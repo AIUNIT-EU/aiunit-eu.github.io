@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#22304a"/>
+      <stop offset="1" stop-color="#1a2332"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <!-- Kreis mit Öffnung unten (Umfang 2·π·165 ≈ 1037; Lücke 160, zentriert bei 90°) -->
+  <circle cx="256" cy="256" r="165" fill="none" stroke="#2d8b8b" stroke-width="10" stroke-linecap="round"
+          stroke-dasharray="877 160" transform="rotate(117.8 256 256)"/>
+  <circle cx="256" cy="421" r="11" fill="#a8dadc"/>
+  <text x="256" y="289" text-anchor="middle" font-family="'Iowan Old Style', Palatino, Georgia, 'DejaVu Serif', serif"
+        font-size="92" font-weight="700" fill="#f1faee" letter-spacing="8">ICH</text>
+</svg>

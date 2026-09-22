@@ -1,0 +1,311 @@
+/* Farbthemen: Standard nach Master-Prompt 11 (Voreinstellung) und vier theme-factory-Themes (Ocean Depths, Forest Canopy, Arctic Frost, Botanical Garden).
+ * Alle Text/Fläche-Paare erfüllen WCAG AA (>= 4,5:1). Diagrammfarbe (--chart) und --danger
+ * sind mit dem dataviz-Validator geprüft (Helligkeit, Chroma, Farbfehlsichtigkeit, Kontrast).
+ * Umschaltung: <html data-palette="standard|ocean|forest|arctic|botanical" data-theme="light|dark"> (ohne data-theme: System). */
+
+:root { --font-body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+
+/* ---------- Standard (Master-Prompt 11, Ausgangswerte geprüft: docs/UX_DESIGN.md) ---------- */
+:root[data-palette="standard"] {
+  color-scheme: light;
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --text: #162030;
+  --muted: #556174;
+  --field-border: #7c879a;  /* Eingaberahmen, >= 3:1 zu Fläche und Hintergrund */
+  --line: #e3e7ee;
+  --primary: #315ddb;
+  --primary-text: #ffffff;
+  --accent: #315ddb;
+  --accent-soft: #e8eefc;
+  --chart: #315ddb;
+  --danger: #b3261e;
+  --warn: #8a5300;
+  --warn-line: #c77700;
+  --warn-bg: #fff3d6;
+  --font-head: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-palette="standard"]:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #10141c;
+    --surface: #191f2a;
+    --text: #f5f7fa;
+    --muted: #b1bccb;
+    --field-border: #6b7689;
+    --line: #2a3342;
+    --primary: #91b4ff;
+    --primary-text: #10141c;
+    --accent: #91b4ff;
+    --accent-soft: #24324f;
+    --chart: #5a8ff0;
+    --danger: #f28b82;
+    --warn: #f0b04a;
+    --warn-line: #f0b04a;
+    --warn-bg: #3a3220;
+    --font-head: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+}
+:root[data-palette="standard"][data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #10141c;
+  --surface: #191f2a;
+  --text: #f5f7fa;
+  --muted: #b1bccb;
+  --field-border: #6b7689;
+  --line: #2a3342;
+  --primary: #91b4ff;
+  --primary-text: #10141c;
+  --accent: #91b4ff;
+  --accent-soft: #24324f;
+  --chart: #5a8ff0;
+  --danger: #f28b82;
+  --warn: #f0b04a;
+  --warn-line: #f0b04a;
+  --warn-bg: #3a3220;
+  --font-head: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+/* ---------- Ozean (Ocean Depths) ---------- */
+:root[data-palette="ocean"] {
+  color-scheme: light;
+  --bg: #eef5f3;
+  --surface: #ffffff;
+  --text: #1a2332;
+  --muted: #53616e;
+  --field-border: #7e8892;  /* Eingaberahmen, >= 3:1 zu Fläche und Hintergrund */
+  --line: #d6e4e1;
+  --primary: #1a2332;
+  --primary-text: #f1faee;
+  --accent: #0b6f7c;
+  --accent-soft: #d9eeec;
+  --chart: #00829b;
+  --danger: #b3261e;
+  --warn: #8a5300;
+  --warn-line: #c77700;
+  --warn-bg: #fff3d6;
+  --font-head: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-palette="ocean"]:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0e141d;
+    --surface: #1a2332;
+    --text: #f1faee;
+    --muted: #a7b6c1;
+    --field-border: #66727f;  /* Eingaberahmen, >= 3:1 zu Fläche und Hintergrund */
+    --line: #2b394a;
+    --primary: #a8dadc;
+    --primary-text: #0e141d;
+    --accent: #7fd0d2;
+    --accent-soft: #1f3a44;
+    --chart: #1ea7ab;
+    --danger: #f28b82;
+    --warn: #f0b04a;
+    --warn-line: #f0b04a;
+    --warn-bg: #3a3220;
+    --font-head: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+}
+:root[data-palette="ocean"][data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0e141d;
+  --surface: #1a2332;
+  --text: #f1faee;
+  --muted: #a7b6c1;
+  --field-border: #66727f;  /* Eingaberahmen, >= 3:1 zu Fläche und Hintergrund */
+  --line: #2b394a;
+  --primary: #a8dadc;
+  --primary-text: #0e141d;
+  --accent: #7fd0d2;
+  --accent-soft: #1f3a44;
+  --chart: #1ea7ab;
+  --danger: #f28b82;
+  --warn: #f0b04a;
+  --warn-line: #f0b04a;
+  --warn-bg: #3a3220;
+  --font-head: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+/* ---------- Wald (Forest Canopy) ---------- */
+:root[data-palette="forest"] {
+  color-scheme: light;
+  --bg: #f4f3ec;
+  --surface: #fffffd;
+  --text: #1f2a1e;
+  --muted: #5b6356;
+  --field-border: #82887e;  /* Eingaberahmen, >= 3:1 zu Fläche und Hintergrund */
+  --line: #e0ded2;
+  --primary: #2d4a2b;
+  --primary-text: #faf9f6;
+  --accent: #3f6a36;
+  --accent-soft: #e6ecdc;
+  --chart: #1a76b3;
+  --danger: #b3261e;
+  --warn: #8a5300;
+  --warn-line: #c77700;
+  --warn-bg: #fff3d6;
+  --font-head: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "DejaVu Serif", serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-palette="forest"]:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #121711;
+    --surface: #1c241b;
+    --text: #eef0e6;
+    --muted: #a9ae9c;
+    --field-border: #6c7365;  /* Eingaberahmen, >= 3:1 zu Fläche und Hintergrund */
+    --line: #2e392c;
+    --primary: #a4ac86;
+    --primary-text: #121711;
+    --accent: #b8c79a;
+    --accent-soft: #2a3527;
+    --chart: #2f8fd0;
+    --danger: #f28b82;
+    --warn: #f0b04a;
+    --warn-line: #f0b04a;
+    --warn-bg: #3a3220;
+    --font-head: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "DejaVu Serif", serif;
+  }
+}
+:root[data-palette="forest"][data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #121711;
+  --surface: #1c241b;
+  --text: #eef0e6;
+  --muted: #a9ae9c;
+  --field-border: #6c7365;  /* Eingaberahmen, >= 3:1 zu Fläche und Hintergrund */
+  --line: #2e392c;
+  --primary: #a4ac86;
+  --primary-text: #121711;
+  --accent: #b8c79a;
+  --accent-soft: #2a3527;
+  --chart: #2f8fd0;
+  --danger: #f28b82;
+  --warn: #f0b04a;
+  --warn-line: #f0b04a;
+  --warn-bg: #3a3220;
+  --font-head: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "DejaVu Serif", serif;
+}
+
+/* ---------- Arktis (Arctic Frost) ---------- */
+:root[data-palette="arctic"] {
+  color-scheme: light;
+  --bg: #edf2f9;
+  --surface: #fbfcfe;
+  --text: #1c2635;
+  --muted: #546173;
+  --field-border: #7c8694;  /* Eingaberahmen, >= 3:1 zu Fläche und Hintergrund */
+  --line: #d4e0ef;
+  --primary: #3f6399;
+  --primary-text: #ffffff;
+  --accent: #3a5f95;
+  --accent-soft: #dde8f6;
+  --chart: #3a6fb8;
+  --danger: #b3261e;
+  --warn: #8a5300;
+  --warn-line: #c77700;
+  --warn-bg: #fff3d6;
+  --font-head: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-palette="arctic"]:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0f141c;
+    --surface: #19212d;
+    --text: #e8eef7;
+    --muted: #a3b0c2;
+    --field-border: #65707f;  /* Eingaberahmen, >= 3:1 zu Fläche und Hintergrund */
+    --line: #2a3444;
+    --primary: #a9c4ea;
+    --primary-text: #0f141c;
+    --accent: #a9c4ea;
+    --accent-soft: #22324a;
+    --chart: #5f95dd;
+    --danger: #f28b82;
+    --warn: #f0b04a;
+    --warn-line: #f0b04a;
+    --warn-bg: #3a3220;
+    --font-head: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+}
+:root[data-palette="arctic"][data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0f141c;
+  --surface: #19212d;
+  --text: #e8eef7;
+  --muted: #a3b0c2;
+  --field-border: #65707f;  /* Eingaberahmen, >= 3:1 zu Fläche und Hintergrund */
+  --line: #2a3444;
+  --primary: #a9c4ea;
+  --primary-text: #0f141c;
+  --accent: #a9c4ea;
+  --accent-soft: #22324a;
+  --chart: #5f95dd;
+  --danger: #f28b82;
+  --warn: #f0b04a;
+  --warn-line: #f0b04a;
+  --warn-bg: #3a3220;
+  --font-head: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+/* ---------- Garten (Botanical Garden) ---------- */
+:root[data-palette="botanical"] {
+  color-scheme: light;
+  --bg: #f5f3ed;
+  --surface: #ffffff;
+  --text: #26302a;
+  --muted: #5d655e;
+  --field-border: #828883;  /* Eingaberahmen, >= 3:1 zu Fläche und Hintergrund */
+  --line: #e4e0d4;
+  --primary: #3f6e4d;
+  --primary-text: #ffffff;
+  --accent: #9c3b22;
+  --accent-soft: #f6e3d8;
+  --chart: #1b78b0;
+  --danger: #b3261e;
+  --warn: #8a5300;
+  --warn-line: #c77700;
+  --warn-bg: #fff3d6;
+  --font-head: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "DejaVu Serif", serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-palette="botanical"]:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #151a16;
+    --surface: #202822;
+    --text: #f5f3ed;
+    --muted: #adb3a9;
+    --field-border: #6f766e;  /* Eingaberahmen, >= 3:1 zu Fläche und Hintergrund */
+    --line: #323c34;
+    --primary: #8fc29e;
+    --primary-text: #151a16;
+    --accent: #eaa287;
+    --accent-soft: #3a2a24;
+    --chart: #3a8fd0;
+    --danger: #f28b82;
+    --warn: #f0b04a;
+    --warn-line: #f0b04a;
+    --warn-bg: #3a3220;
+    --font-head: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "DejaVu Serif", serif;
+  }
+}
+:root[data-palette="botanical"][data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #151a16;
+  --surface: #202822;
+  --text: #f5f3ed;
+  --muted: #adb3a9;
+  --field-border: #6f766e;  /* Eingaberahmen, >= 3:1 zu Fläche und Hintergrund */
+  --line: #323c34;
+  --primary: #8fc29e;
+  --primary-text: #151a16;
+  --accent: #eaa287;
+  --accent-soft: #3a2a24;
+  --chart: #3a8fd0;
+  --danger: #f28b82;
+  --warn: #f0b04a;
+  --warn-line: #f0b04a;
+  --warn-bg: #3a3220;
+  --font-head: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "DejaVu Serif", serif;
+}
