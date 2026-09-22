@@ -39,6 +39,33 @@ function toast(msg) {
   toast.timer = setTimeout(() => { t.hidden = true; }, 3500);
 }
 
+// ---------- Updates (REL-02) ----------
+// Eine neue Version wird nie still aktiviert: Die App zeigt einen Hinweis, gewechselt wird erst nach „Aktualisieren“.
+// Vorher wird der Tagebuch-Entwurf verschlüsselt gesichert; bei offenem Formular wird nicht gewechselt.
+
+function watchForUpdates(reg) {
+  const offer = () => { if (reg.waiting && navigator.serviceWorker.controller) $('#update-bar').hidden = false; };
+  offer();
+  reg.addEventListener('updatefound', () => {
+    const next = reg.installing;
+    next?.addEventListener('statechange', () => { if (next.state === 'installed') offer(); });
+  });
+  // Beim Zurückkehren in die App nach einer neuen Version fragen (höchstens alle 30 Minuten)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible' || Date.now() - (watchForUpdates.last || 0) < 30 * 60 * 1000) return;
+    watchForUpdates.last = Date.now();
+    reg.update().catch(() => {});
+  });
+  $('#btn-update').addEventListener('click', async () => {
+    if ($('#editor').open) { toast('Bitte zuerst das offene Formular speichern oder schließen.'); return; }
+    if (diary.isRecording()) { toast('Bitte zuerst die Aufnahme beenden.'); return; }
+    if (state.key) await diary.flushDraft();
+    if (!reg.waiting) { location.reload(); return; }
+    navigator.serviceWorker.addEventListener('controllerchange', () => location.reload(), { once: true });
+    reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+  });
+}
+
 // Nur Darstellungs-Einstellungen und Zeitstempel, keine Inhalte (siehe docs/SECURITY.md)
 function prefs() {
   try { return JSON.parse(localStorage.getItem('ich-prefs')) || {}; } catch { return {}; }
@@ -127,6 +154,7 @@ function onVisibility() {
 
 function lock() {
   diary.onLock();
+  security.forgetPreparedBackup();
   documents.onLock();
   state.key = null;
   state.records = [];
@@ -273,6 +301,9 @@ async function renderSettings() {
   $('#tc-plz').value = tc?.postalCode || '';
   $('#tc-status').textContent = tc?.endpoint ? 'Eingerichtet. Der Zugangsschlüssel liegt verschlüsselt im Tresor.' : 'Noch nicht eingerichtet.';
   await security.renderSecuritySettings();
+  const share = security.canShareBackup();
+  $('#btn-share-backup').hidden = !share;
+  $('#share-backup-hint').hidden = !share;
   const info = $('#storage-info');
   const unlockText = p.lastUnlockMs ? ` Letztes Entsperren dauerte ${(p.lastUnlockMs / 1000).toFixed(1).replace('.', ',')} s.` : '';
   info.textContent = unlockText.trim();
@@ -313,6 +344,7 @@ async function init() {
     if (first) contracts.openDetail(ctx, first.c.id);
   });
   $('#btn-export').addEventListener('click', async () => { await security.exportBackup(); renderSettings(); });
+  $('#btn-share-backup').addEventListener('click', async () => { await security.shareBackup(); renderSettings(); });
   $('#verify-import').addEventListener('change', onFile(security.verifyFile));
   $('#settings-import').addEventListener('change', onFile(security.restoreFile));
   $('#setup-import').addEventListener('change', onFile(security.restoreFile));
@@ -336,7 +368,7 @@ async function init() {
   });
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    navigator.serviceWorker.register('sw.js').then(watchForUpdates).catch(() => {});
   }
 
   if (!window.crypto?.subtle || !window.indexedDB) {

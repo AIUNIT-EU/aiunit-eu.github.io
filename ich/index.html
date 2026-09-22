@@ -54,6 +54,12 @@
     <symbol id="i-rotate-cw" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" /> <path d="M21 3v5h-5" /></symbol>
   </svg>
 
+  <!-- Neue Version verfügbar (REL-02): erscheint in jeder Ansicht, gewechselt wird nur auf Knopfdruck -->
+  <div id="update-bar" class="update-bar" role="status" hidden>
+    <span>Eine neue Version von ICH ist bereit.</span>
+    <button type="button" id="btn-update" class="primary small">Aktualisieren</button>
+  </div>
+
   <!-- Ersteinrichtung -->
   <section id="view-setup" class="view card-view" hidden>
     <div class="brand">
@@ -127,6 +133,12 @@
       </form>
 
       <input id="search" type="search" placeholder="Einträge durchsuchen …" aria-label="Einträge durchsuchen">
+      <fieldset id="range-filter" class="range-filter">
+        <legend class="visually-hidden">Zeitraum</legend>
+        <label>Von <input type="date" id="range-from"></label>
+        <label>Bis <input type="date" id="range-to"></label>
+        <button type="button" id="range-reset" class="secondary small" hidden>Alle Tage anzeigen</button>
+      </fieldset>
       <div id="tag-filter" class="tag-filter"></div>
       <div id="entries" aria-live="polite"></div>
     </div>
@@ -192,7 +204,11 @@
       <h2>Sicherung</h2>
       <p id="backup-status" class="backup-status"></p>
       <p class="muted small">Die Sicherungsdatei (.ichbackup) ist verschlüsselt und nur mit deiner Passphrase oder dem Wiederherstellungsschlüssel lesbar. Eine Sicherung nur auf diesem Handy schützt nicht vor Verlust des Geräts: Lege eine Kopie auf einem zweiten Medium ab (z. B. Computer, USB-Stick) und prüfe sie einmal.</p>
-      <button id="btn-export" class="secondary"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Sicherung erstellen</button>
+      <div class="toolbar">
+        <button id="btn-export" class="secondary"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Sicherung erstellen</button>
+        <button id="btn-share-backup" class="secondary" hidden><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>Sicherung teilen</button>
+      </div>
+      <p id="share-backup-hint" class="muted small" hidden>„Sicherung teilen“ übergibt die verschlüsselte Datei an eine App deiner Wahl, z. B. Dateien oder einen Cloud-Speicher. Wählst du einen Cloud-Speicher, verlässt die Datei das Handy, bleibt aber verschlüsselt.</p>
       <label class="file-label">Sicherung prüfen (ändert nichts)
         <input type="file" id="verify-import" accept=".ichbackup,.ich,application/json,application/octet-stream">
       </label>

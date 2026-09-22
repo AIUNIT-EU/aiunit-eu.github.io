@@ -42,3 +42,23 @@ export function formatDE(iso) {
   const { y, m, d } = parseISODate(iso);
   return `${pad(d)}.${pad(m)}.${y}`;
 }
+
+/**
+ * Kalendertag eines Zeitpunkts in einer bestimmten Zeitzone ('YYYY-MM-DD').
+ * Ein Tagebucheintrag gehört zu dem Tag, den seine eigene Zeitzone zeigt, nicht die des Geräts.
+ */
+export function localDateIn(isoInstant, timeZone) {
+  const date = new Date(isoInstant);
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
+  } catch {
+    return new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
+  }
+}
+
+/** Liegt der Kalendertag im Zeitraum? Grenzen einschließlich, fehlende Grenze = offen. Vertauschte Grenzen werden getauscht. */
+export function inDateRange(dayIso, from, to) {
+  let a = from || null, b = to || null;
+  if (a && b && a > b) [a, b] = [b, a];
+  return (!a || dayIso >= a) && (!b || dayIso <= b);
+}

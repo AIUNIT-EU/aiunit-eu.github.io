@@ -7,6 +7,7 @@
 import { AUDIO_MAX_SECONDS } from '../config.js';
 import { openForm } from '../ui/form.js';
 import { el, icon } from '../ui/dom.js';
+import { localDateIn, inDateRange, formatDE } from '../lib/dates.js';
 
 const MOODS = ['sehr gut', 'gut', 'neutral', 'schlecht', 'sehr schlecht'];
 const $ = sel => document.querySelector(sel);
@@ -18,6 +19,8 @@ const st = {
   replaceFor: null,    // ID des Eintrags, dessen Sprachnotiz die nächste Aufnahme ersetzt (oder ergänzt)
   audioUrls: new Map(),
   tag: null,
+  from: null, // Zeitraumfilter (Kalendertage, einschließlich), null = offen
+  to: null,
   draftTimer: null,
 };
 
@@ -36,6 +39,8 @@ function fmt(e, opts) {
   }
 }
 const dayLabel = e => fmt(e, { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
+/** Kalendertag des Eintrags in seiner eigenen Zeitzone ('YYYY-MM-DD'), Grundlage für Tagesansicht und Zeitraumfilter. */
+export const dayOf = e => localDateIn(occurred(e), tzOf(e));
 const timeLabel = e => fmt(e, { hour: '2-digit', minute: '2-digit' });
 
 export function parseTags(raw) {
@@ -143,6 +148,15 @@ function scheduleDraft() {
     if ((current?.text || '') === text) return;
     await st.ctx.saveConfig('draft', { text }, { silent: true }).catch(() => {}); // Entwurf ist Komfort, kein Muss
   }, 800);
+}
+
+/** Entwurf sofort sichern (vor einem Update), statt auf den Zeitgeber zu warten. */
+export async function flushDraft() {
+  clearTimeout(st.draftTimer);
+  if (st.ctx.isLocked()) return;
+  const text = $('#entry-text').value;
+  if ((st.ctx.getConfig('draft')?.text || '') === text) return;
+  await st.ctx.saveConfig('draft', { text }, { silent: true }).catch(() => {});
 }
 
 async function clearDraft() {
@@ -362,21 +376,36 @@ export function render() {
     ...tags.map(t => el('button', { class: `tag-chip${st.tag === t ? ' active' : ''}`, onclick: () => { st.tag = st.tag === t ? null : t; render(); } }, `#${t}`)),
   ] : []));
 
+  $('#range-from').value = st.from || '';
+  $('#range-to').value = st.to || '';
+  const ranged = !!(st.from || st.to);
+  $('#range-reset').hidden = !ranged;
+
   const list = diary
     .filter(e => !st.tag || (e.tags || []).includes(st.tag))
+    .filter(e => !ranged || inDateRange(dayOf(e), st.from, st.to))
     .filter(e => !q || [e.title, e.text, ...(e.tags || [])].some(v => (v || '').toLowerCase().includes(q)))
     .sort((a, b) => occurred(b).localeCompare(occurred(a)));
 
   const root = $('#entries');
   if (!list.length) {
-    root.replaceChildren(el('p', { class: 'muted empty', text: q || st.tag ? 'Keine Treffer.' : 'Noch keine Einträge. Schreib etwas oder starte eine Aufnahme.' }));
+    const rangeText = ranged ? ` im Zeitraum ${rangeLabel()}` : '';
+    root.replaceChildren(el('p', { class: 'muted empty', text: q || st.tag || ranged ? `Keine Treffer${rangeText}.` : 'Noch keine Einträge. Schreib etwas oder starte eine Aufnahme.' }));
     return;
   }
   const nodes = [];
   let lastDay = '';
   for (const entry of list) {
     const day = dayLabel(entry);
-    if (day !== lastDay) { nodes.push(el('h2', { class: 'day', text: day })); lastDay = day; }
+    if (day !== lastDay) {
+      const iso = dayOf(entry);
+      const single = st.from === iso && st.to === iso;
+      nodes.push(el('h2', { class: 'day' }, single ? day : el('button', {
+        type: 'button', class: 'day-link', 'aria-label': `Nur ${day} anzeigen`,
+        onclick: () => { st.from = iso; st.to = iso; render(); $('#tab-diary').scrollIntoView?.({ block: 'start' }); },
+      }, day)));
+      lastDay = day;
+    }
     const backdated = entry.occurredAt && entry.occurredAt.slice(0, 10) !== entry.createdAt.slice(0, 10);
     const box = entry.audio ? el('div', { class: 'audio-box' },
       el('button', { class: 'secondary small', onclick: e => playAudio(entry, e.currentTarget.parentElement) }, icon('play'), `Sprachnotiz (${mmss(entry.audio.durationSec)})`)) : null;
@@ -396,6 +425,11 @@ export function render() {
   root.replaceChildren(...nodes);
 }
 
+function rangeLabel() {
+  if (st.from && st.to) return st.from === st.to ? formatDE(st.from) : `${formatDE(st.from < st.to ? st.from : st.to)} – ${formatDE(st.from < st.to ? st.to : st.from)}`;
+  return st.from ? `ab ${formatDE(st.from)}` : `bis ${formatDE(st.to)}`;
+}
+
 // ---------- Lebenszyklus ----------
 
 export function init(ctx) {
@@ -403,6 +437,9 @@ export function init(ctx) {
   $('#form-entry').addEventListener('submit', onSaveText);
   $('#entry-text').addEventListener('input', scheduleDraft);
   $('#search').addEventListener('input', render);
+  $('#range-from').addEventListener('change', e => { st.from = e.target.value || null; render(); });
+  $('#range-to').addEventListener('change', e => { st.to = e.target.value || null; render(); });
+  $('#range-reset').addEventListener('click', () => { st.from = null; st.to = null; render(); });
   $('#btn-more').addEventListener('click', () => editEntry(null));
   renderRecordControls();
 }
@@ -419,6 +456,8 @@ export function onLock() {
   st.audioUrls.forEach(url => URL.revokeObjectURL(url));
   st.audioUrls.clear();
   st.tag = null;
+  st.from = null;
+  st.to = null;
   $('#entries').replaceChildren();
   $('#tag-filter').replaceChildren();
   $('#entry-text').value = '';

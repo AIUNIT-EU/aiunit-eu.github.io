@@ -1,5 +1,5 @@
 // Service Worker: macht die App offline nutzbar. Cacht nur App-Dateien, niemals Nutzerdaten.
-const CACHE = 'ich-v0.7.0';
+const CACHE = 'ich-v0.8.0';
 const ASSETS = [
   './',
   './index.html',
@@ -33,8 +33,14 @@ const ASSETS = [
   './icons/icon-512.png',
 ];
 
+// Eine neue Version wartet, bis der Nutzer in der App „Aktualisieren“ tippt (REL-02, docs/ARCHITECTURE.md).
+// Nur bei der allerersten Installation gibt es keine alte Version, dann wird sie sofort aktiv.
 self.addEventListener('install', event => {
-  event.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  event.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
+});
+
+self.addEventListener('message', event => {
+  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('activate', event => {

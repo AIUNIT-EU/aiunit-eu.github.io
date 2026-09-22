@@ -42,12 +42,70 @@ export function backupStatusText() {
 
 // ---------- Export ----------
 
-export async function exportBackup({ silent = false, prefix = 'Sicherung' } = {}) {
+const BACKUP_MIME = 'application/octet-stream';
+
+/** Erzeugt die verschlüsselte Sicherungsdatei (einmal), ohne sie abzulegen. */
+async function buildBackupFile(prefix = 'Sicherung') {
   const data = await store.exportVault(app.ctx.key(), APP_VERSION);
   const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
-  downloadFile(`${APP_NAME}-${prefix}-${stamp}${BACKUP_EXTENSION}`, JSON.stringify(data), 'application/octet-stream');
+  return new File([JSON.stringify(data)], `${APP_NAME}-${prefix}-${stamp}${BACKUP_EXTENSION}`, { type: BACKUP_MIME });
+}
+
+export async function exportBackup({ silent = false, prefix = 'Sicherung' } = {}) {
+  const file = await buildBackupFile(prefix);
+  downloadFile(file.name, file, BACKUP_MIME);
   if (prefix === 'Sicherung') app.setPref('lastExport', new Date().toISOString());
   if (!silent) app.ctx.toast('Sicherung erstellt. Bitte auf einem zweiten Medium ablegen und einmal prüfen.');
+}
+
+// ---------- Sicherung teilen (P1-06) ----------
+// Übergibt die verschlüsselte Datei an das Teilen-Menü des Systems (z. B. Dateien, Mail, Cloud-Speicher).
+// Das Ziel wählt der Nutzer. Ohne Unterstützung bleibt der Download.
+
+let prepared = null; // { file, at } – vorbereitete Datei für einen zweiten Versuch, nur im Arbeitsspeicher
+const PREPARED_TTL = 2 * 60 * 1000;
+
+export function canShareBackup() {
+  try {
+    return typeof navigator.share === 'function'
+      && !!navigator.canShare?.({ files: [new File(['x'], `test${BACKUP_EXTENSION}`, { type: BACKUP_MIME })] });
+  } catch {
+    return false;
+  }
+}
+
+/** Beim Sperren: vorbereitete Datei verwerfen. */
+export function forgetPreparedBackup() {
+  prepared = null;
+}
+
+export async function shareBackup() {
+  // Einige Browser erlauben das Teilen nur kurz nach dem Tippen. Deshalb wird eine schon vorbereitete Datei sofort geteilt.
+  const fresh = prepared && Date.now() - prepared.at < PREPARED_TTL;
+  const file = fresh ? prepared.file : await buildBackupFile();
+  prepared = null;
+  if (!navigator.canShare?.({ files: [file] })) {
+    downloadFile(file.name, file, BACKUP_MIME);
+    app.setPref('lastExport', new Date().toISOString());
+    app.ctx.toast('Teilen wird hier nicht unterstützt. Die Sicherung wurde stattdessen heruntergeladen.');
+    return;
+  }
+  try {
+    await navigator.share({ files: [file], title: `${APP_NAME} Sicherung` });
+  } catch (err) {
+    if (err?.name === 'AbortError') { app.ctx.toast('Teilen abgebrochen. Es wurde keine Sicherung abgelegt.'); return; }
+    if (err?.name === 'NotAllowedError' && !fresh) {
+      prepared = { file, at: Date.now() };
+      app.ctx.toast('Sicherung vorbereitet. Bitte noch einmal auf „Sicherung teilen“ tippen.');
+      return;
+    }
+    downloadFile(file.name, file, BACKUP_MIME);
+    app.setPref('lastExport', new Date().toISOString());
+    app.ctx.toast('Teilen hat nicht geklappt. Die Sicherung wurde stattdessen heruntergeladen.');
+    return;
+  }
+  app.setPref('lastExport', new Date().toISOString());
+  app.ctx.toast('Sicherung übergeben. Bitte einmal über „Sicherung prüfen“ kontrollieren.');
 }
 
 // ---------- Einlesen + Prüfen ----------
