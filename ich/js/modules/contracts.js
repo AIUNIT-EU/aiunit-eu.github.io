@@ -1,25 +1,16 @@
 // M2 – Verträge, Versicherungen und Abos (module: 'contract') inkl. M5 KI-Tarifcheck
 
-import { nextDeadline, monthlyCost, INTERVALS } from '../lib/contract-logic.js';
+import { CONTRACT_CATEGORIES, nextDeadline, monthlyCost, INTERVALS } from '../lib/contract-logic.js';
 import { formatDE, addDays } from '../lib/dates.js';
 import { buildICS } from '../lib/ics.js';
 import { comparisonLinks } from '../lib/compare-links.js';
 import { buildPayload, describePayload, requestCheck, NOT_COMPARABLE } from '../lib/tarifcheck.js';
 import { openForm, openSheet } from '../ui/form.js';
-import { docsFor, docList, openDocument, startScan, removeLinked, onDocumentSaved } from './documents.js';
+import { docsFor, docList, openDocument, startScan, removeLinked, onDocumentSaved, recognizeDocument, markablePages } from './documents.js';
+import { parseContractPages } from '../lib/parse-contract.js';
 import { el, icon, downloadFile, euro } from '../ui/dom.js';
 
-export const CATEGORIES = [
-  'Versicherung',
-  'Strom / Gas / Energie',
-  'Wasser',
-  'Telefon / Internet / Mobilfunk',
-  'Abo / Streaming',
-  'Miete / Wohnen',
-  'Kredit / Finanzen',
-  'Mitgliedschaft',
-  'Sonstiges',
-];
+export const CATEGORIES = CONTRACT_CATEGORIES;
 
 const FIELDS = [
   { name: 'category', label: 'Kategorie', type: 'select', options: CATEGORIES, required: true },
@@ -55,16 +46,25 @@ function validate(d) {
   if (d.remindDays === null) d.remindDays = 30;
 }
 
-export function editContract(ctx, contract) {
+/**
+ * Vertrag anlegen oder bearbeiten. scan: { values, found: { feld: Fundzeile }, doc } füllt Felder aus einem erkannten
+ * Dokument vor und markiert sie („aus dem Scan – bitte prüfen“); nach dem Speichern wird das Dokument zugeordnet.
+ */
+export function editContract(ctx, contract, scan = null) {
+  const found = scan?.found || {};
   openForm({
-    title: contract ? 'Vertrag bearbeiten' : 'Neuer Vertrag',
-    fields: FIELDS,
-    values: contract || {},
-    note: 'Die Fristen werden aus deinen Angaben berechnet. Das ist keine Rechtsberatung.',
+    title: contract ? 'Vertrag bearbeiten' : scan ? 'Vertrag aus Dokument' : 'Neuer Vertrag',
+    fields: FIELDS.map(f => (found[f.name] ? { ...f, more: false, hint: `Aus dem Scan, bitte prüfen: „${found[f.name]}“` } : f)),
+    values: contract || scan?.values || {},
+    note: scan
+      ? `${Object.keys(found).length ? `${Object.keys(found).length} Angaben wurden auf dem Gerät erkannt und vorausgefüllt.` : 'Im Dokument wurden keine Angaben sicher erkannt.'} Bitte alles mit dem Dokument vergleichen. Die Fristen werden aus deinen Angaben berechnet, das ist keine Rechtsberatung.`
+      : 'Die Fristen werden aus deinen Angaben berechnet. Das ist keine Rechtsberatung.',
     onSave: async data => {
       validate(data);
-      await ctx.save({ ...(contract || { module: 'contract' }), ...data });
+      const saved = await ctx.save({ ...(contract || { module: 'contract' }), ...data });
+      if (scan?.doc) await ctx.save({ ...scan.doc, linkedId: saved.id }, { silent: true });
       ctx.toast('Vertrag gespeichert');
+      if (scan?.doc) setTimeout(() => openDetail(ctx, saved.id), 0);
     },
     onDelete: contract ? async () => { await removeLinked(contract.id); await ctx.remove(contract); } : null,
     deleteConfirm: contract && docsFor(ctx.records, 'contracts', contract.id).length
@@ -106,6 +106,12 @@ function calendarEvents(c, info, today) {
   }
   events.push({ uid: `${c.id}-${target}-frist@ich`, date: target, summary: `${GENERIC}: Frist heute`, description: GENERIC_DESC });
   return events;
+}
+
+/** Alle Erinnerungstermine aller Verträge (für den Google-Kalender, ADR-0009). Neutrale Titel, keine Vertragsdetails. */
+export function allCalendarEvents(records, today) {
+  return records.filter(r => r.module === 'contract')
+    .flatMap(c => calendarEvents(c, nextDeadline(c, today), today));
 }
 
 function exportCalendar(ctx, items, filename) {
@@ -221,6 +227,69 @@ export function openDetail(ctx, id) {
 
 onDocumentSaved('contracts', (doc, ctx) => { ctx.showTab('contracts'); openDetail(ctx, doc.linkedId); });
 
+// ---------- Vertragsangaben aus einem Dokument erkennen (lokal, DOC-12) ----------
+
+const SCAN_FIELDS = ['category', 'provider', 'contractNo', 'cost', 'interval', 'start', 'minTermMonths', 'termEnd', 'noticeValue', 'noticeUnit'];
+
+async function recognizeContract(doc) {
+  const pages = await recognizeDocument(doc);
+  if (!pages) return null;
+  const hits = parseContractPages(pages);
+  const values = {};
+  const found = {};
+  for (const k of SCAN_FIELDS) if (hits[k]) { values[k] = hits[k].value; found[k] = hits[k].line; }
+  return { values, found, hits };
+}
+
+/** Neuer Vertrag aus einem gerade gescannten Dokument: erkennen, Formular vorausfüllen, nach dem Speichern zuordnen. */
+async function contractFromDocument(ctx, doc) {
+  const r = await recognizeContract(doc);
+  const fresh = ctx.records.find(x => x.id === doc.id) || doc;
+  editContract(ctx, null, { values: { name: fresh.title, ...(r?.values || {}) }, found: r?.found || {}, doc: fresh });
+}
+
+const FIELD_LABEL = Object.fromEntries(FIELDS.map(f => [f.name, f.label]));
+const shownValue = (k, v) => (v === null || v === undefined || v === '' ? '–'
+  : ['start', 'termEnd'].includes(k) ? formatDE(v) : k === 'cost' ? euro.format(v) : String(v));
+
+/** Bestehender Vertrag: erkannte Abweichungen einzeln zur Übernahme anbieten. Nichts wird ohne Häkchen überschrieben. */
+async function updateFromDocument(ctx, c, doc) {
+  const r = await recognizeContract(doc);
+  if (!r) return;
+  const back = () => openDetail(ctx, c.id);
+  const diffs = SCAN_FIELDS.filter(k => r.values[k] !== undefined && String(r.values[k]) !== String(c[k] ?? ''));
+  if (!diffs.length) {
+    back();
+    ctx.toast(Object.keys(r.values).length ? 'Die erkannten Angaben stimmen mit dem Vertrag überein.' : 'Im Dokument wurden keine Vertragsangaben erkannt.');
+    return;
+  }
+  const { node: pagesNode, mark } = markablePages(doc);
+  const rows = diffs.map(k => {
+    const check = el('input', { type: 'checkbox', name: k, 'aria-label': `${FIELD_LABEL[k]} übernehmen` });
+    check.checked = c[k] === null || c[k] === undefined || c[k] === ''; // nur leere Felder vorauswählen
+    return { k, check, row: el('article', { class: 'ocr-row' },
+      el('label', { class: 'ocr-check' }, check, el('span', { class: 'ocr-name', text: FIELD_LABEL[k] })),
+      el('p', { class: 'small', text: `bisher: ${shownValue(k, c[k])} → erkannt: ${shownValue(k, r.values[k])}` }),
+      el('button', { type: 'button', class: 'link ocr-source', onclick: () => mark(r.hits[k].page, r.hits[k].bbox) }, `Im Dokument zeigen: „${r.found[k]}“`)) };
+  });
+  const apply = el('button', { type: 'button', class: 'primary', id: 'btn-ocr-apply', onclick: async () => {
+    const chosen = rows.filter(x => x.check.checked);
+    if (!chosen.length) { back(); return; }
+    const next = { ...c };
+    chosen.forEach(x => { next[x.k] = r.values[x.k]; });
+    try { validate(next); await ctx.save(next); } catch (err) { ctx.toast(err.message); return; }
+    ctx.toast(`${chosen.length} ${chosen.length === 1 ? 'Angabe' : 'Angaben'} übernommen`);
+    back();
+  } }, 'Übernehmen');
+  openSheet({
+    title: 'Erkannte Angaben prüfen',
+    subtitle: `${diffs.length} Abweichungen · nichts ist gespeichert`,
+    body: [el('p', { class: 'muted small', text: 'Nur angehakte Angaben werden in den Vertrag übernommen. Vergleiche sie mit dem Dokument.' }),
+      el('div', { class: 'ocr-list' }, rows.map(x => x.row)), el('h3', { text: 'Dokument' }), pagesNode],
+    actions: [el('button', { type: 'button', class: 'secondary', onclick: back }, 'Verwerfen'), apply],
+  });
+}
+
 // Gescannte Dokumente zum Vertrag (Police, Rechnungen …). Sie werden nie an den Tarifcheck gesendet.
 function documentsSection(ctx, c) {
   const docs = docsFor(ctx.records, 'contracts', c.id);
@@ -228,9 +297,13 @@ function documentsSection(ctx, c) {
   return el('section', { class: 'doc-section' },
     el('h3', {}, icon('file-text'), 'Dokumente'),
     docs.length
-      ? docList(docs, id => openDocument(id, { actions: [el('button', { type: 'button', class: 'secondary', onclick: back }, 'Zum Vertrag')] }))
+      ? docList(docs, id => openDocument(id, { actions: [
+        el('button', { type: 'button', class: 'secondary', id: 'btn-doc-ocr', onclick: () => updateFromDocument(ctx, c, ctx.records.find(r => r.id === id)) }, icon('scan-text'), 'Angaben erkennen'),
+        el('button', { type: 'button', class: 'secondary', onclick: back }, 'Zum Vertrag')] }))
       : el('p', { class: 'muted small', text: 'Police, Rechnungen oder Beitragsanpassungen einfach abfotografieren. Sie bleiben verschlüsselt auf diesem Gerät.' }),
-    el('button', { class: 'secondary wide', id: 'btn-scan-contract', onclick: () => startScan({ area: 'contracts', linkedId: c.id }) },
+    el('button', { class: 'secondary wide', id: 'btn-scan-contract', onclick: () => startScan({ area: 'contracts', linkedId: c.id,
+      // Nach dem Speichern: erkannte Abweichungen zur Übernahme anbieten
+      onSaved: doc => updateFromDocument(ctx, ctx.records.find(r => r.id === c.id) || c, doc) }) },
       icon('camera'), 'Dokument scannen'));
 }
 
@@ -359,15 +432,17 @@ export function render(root, ctx) {
       el('div', {}, el('span', { class: 'muted small', text: 'pro Monat' }), el('strong', { text: euro.format(perMonth) })),
       el('div', {}, el('span', { class: 'muted small', text: 'pro Jahr' }), el('strong', { text: euro.format(perMonth * 12) })),
       el('div', {}, el('span', { class: 'muted small', text: 'Verträge' }), el('strong', { text: String(items.length) }))),
-    el('div', { class: 'toolbar' },
-      el('button', { class: 'primary', id: 'btn-add-contract', onclick: () => editContract(ctx, null) }, icon('plus'), 'Vertrag'),
+    el('div', { class: 'toolbar choice' }, // „Scannen“ und „Selbst eintragen“ gleich groß nebeneinander
+      el('button', { class: 'primary', id: 'btn-contract-from-scan', onclick: () => startScan({ area: 'contracts', linkedId: null, onSaved: doc => contractFromDocument(ctx, doc) }) },
+        icon('camera'), 'Vertrag scannen'),
+      el('button', { class: 'secondary', id: 'btn-add-contract', onclick: () => editContract(ctx, null) }, icon('pencil'), 'Selbst eintragen'),
       items.length ? el('button', { class: 'secondary', onclick: () => exportCalendar(ctx, items, 'ICH-Fristen.ics') },
         icon('calendar-plus'), 'Alle Fristen in Kalender') : null),
   ];
 
   if (!items.length) {
     nodes.push(el('div', { class: 'empty-state' }, icon('file-text'),
-      el('p', { text: 'Noch keine Verträge. Lege Versicherungen, Strom, Handy, Abos und alles andere mit Laufzeit an. Die App erinnert dich an Kündigungsfristen und prüft auf Wunsch, ob es günstigere Angebote gibt.' })));
+      el('p', { text: 'Noch keine Verträge. „Vertrag scannen“: Police oder Vertrag fotografieren, die App füllt die Angaben auf dem Gerät vor, du prüfst sie. „Selbst eintragen“: alles von Hand erfassen. Beides lässt sich später bearbeiten. Die App erinnert dich an Kündigungsfristen und prüft auf Wunsch, ob es günstigere Angebote gibt.' })));
     root.replaceChildren(...nodes);
     return;
   }

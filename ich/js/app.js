@@ -13,6 +13,9 @@ import * as overview from './modules/overview.js';
 import * as security from './modules/security.js';
 import * as documents from './modules/documents.js';
 import * as more from './modules/more.js';
+import * as extras from './modules/extras.js';
+import * as connections from './modules/connections.js';
+import * as assets from './lib/assets.js';
 
 export { APP_VERSION };
 
@@ -83,6 +86,8 @@ const ctx = {
   get records() { return state.records; },
   key: () => state.key,
   today: () => todayISO(),
+  prefs: () => prefs(),
+  setPref: (k, v) => setPref(k, v),
   toast,
   isLocked: () => !state.key,
   async save(record, { silent = false } = {}) {
@@ -94,6 +99,7 @@ const ctx = {
     if (i >= 0) state.records[i] = rec; else state.records.push(rec);
     broadcast('changed');
     if (!silent) renderAll();
+    if (rec.module === 'contract') connections.contractsChanged(ctx); // Google Kalender nachziehen (nur wenn verbunden)
     return rec;
   },
   async remove(record, blobIds = []) {
@@ -102,6 +108,7 @@ const ctx = {
     broadcast('changed');
     toast('Eintrag gelöscht');
     renderAll();
+    if (record.module === 'contract') connections.contractsChanged(ctx);
   },
   saveBlob: (id, bytes) => store.saveBlob(state.key, id, bytes),
   loadBlob: id => store.loadBlob(state.key, id),
@@ -156,6 +163,7 @@ function lock() {
   diary.onLock();
   security.forgetPreparedBackup();
   documents.onLock();
+  connections.onLock();
   state.key = null;
   state.records = [];
   closeForm();
@@ -177,6 +185,9 @@ async function onUnlocked(key, { replaced = false } = {}) {
   if (diary.restoreDraft()) toast('Dein letzter Entwurf wurde wiederhergestellt.');
   documents.resumeDraft(); // angefangener Scan, z. B. nach Neustart der App durch die Kamera
   resetLockTimer();
+  connections.onUnlocked(ctx);
+  // Zusatzfunktionen (Texterkennung, Sprachumwandlung) automatisch mitladen; Tests schalten das gezielt ab
+  if (!window.ICH_TEST_NO_PRELOAD) assets.start();
   if (replaced) broadcast('replaced');
 }
 
@@ -219,6 +230,22 @@ async function onUnlock(e) {
   } finally {
     btn.disabled = false;
   }
+}
+
+// ---------- Hell/Dunkel ----------
+
+function isDark() {
+  const mode = prefs().mode;
+  return mode === 'dark' || (mode !== 'light' && !!window.matchMedia?.('(prefers-color-scheme: dark)').matches);
+}
+
+function syncThemeButton() {
+  const btn = $('#btn-theme');
+  if (!btn) return;
+  const dark = isDark();
+  btn.setAttribute('aria-label', dark ? 'Hell einschalten' : 'Dunkel einschalten');
+  btn.title = dark ? 'Hell einschalten' : 'Dunkel einschalten';
+  btn.querySelector('use').setAttribute('href', dark ? '#i-sun' : '#i-moon');
 }
 
 // ---------- Bereiche ----------
@@ -292,6 +319,8 @@ async function renderSettings() {
   const p = prefs();
   $('#autolock').value = String(p.autolock || 5);
   $('#color-mode').value = p.mode || 'system';
+  $('#pref-impulses').checked = !!p.impulses;
+  $('#pref-reflection').checked = !!p.reflection;
   const current = document.documentElement.dataset.palette;
   document.querySelectorAll('#palette-picker input').forEach(r => { r.checked = r.value === current; });
   $('#app-version').textContent = `${APP_NAME} Version ${APP_VERSION}`;
@@ -354,8 +383,19 @@ async function init() {
   $('#autolock').addEventListener('change', e => { setPref('autolock', Number(e.target.value)); resetLockTimer(); });
   const applyTheme = () => window.ICH_APPLY_THEME?.(prefs().palette, prefs().mode);
   document.querySelectorAll('#palette-picker input').forEach(r => r.addEventListener('change', () => { setPref('palette', r.value); applyTheme(); }));
-  $('#color-mode').addEventListener('change', e => { setPref('mode', e.target.value); applyTheme(); });
-  window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change', applyTheme);
+  $('#color-mode').addEventListener('change', e => { setPref('mode', e.target.value); applyTheme(); syncThemeButton(); });
+  // Schnellumschalter Hell/Dunkel oben rechts; setzt die Einstellung fest auf „immer hell“ bzw. „immer dunkel“
+  $('#btn-theme').addEventListener('click', () => {
+    const mode = isDark() ? 'light' : 'dark';
+    setPref('mode', mode);
+    $('#color-mode').value = mode;
+    applyTheme();
+    syncThemeButton();
+  });
+  syncThemeButton();
+  $('#pref-impulses').addEventListener('change', e => { setPref('impulses', e.target.checked); renderAll(); });
+  $('#pref-reflection').addEventListener('change', e => { setPref('reflection', e.target.checked); });
+  window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change', () => { applyTheme(); syncThemeButton(); });
   ['pointerdown', 'keydown', 'touchstart'].forEach(ev => document.addEventListener(ev, resetLockTimer, { passive: true }));
   document.addEventListener('visibilitychange', onVisibility);
 
@@ -366,6 +406,8 @@ async function init() {
       try { state.records = await store.loadRecords(state.key); renderAll(); } catch { lock(); }
     }
   });
+
+  assets.onChange(() => { if (state.key) extras.refresh(ctx); });
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     navigator.serviceWorker.register('sw.js').then(watchForUpdates).catch(() => {});

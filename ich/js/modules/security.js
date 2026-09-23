@@ -45,7 +45,7 @@ export function backupStatusText() {
 const BACKUP_MIME = 'application/octet-stream';
 
 /** Erzeugt die verschlüsselte Sicherungsdatei (einmal), ohne sie abzulegen. */
-async function buildBackupFile(prefix = 'Sicherung') {
+export async function buildBackupFile(prefix = 'Sicherung') {
   const data = await store.exportVault(app.ctx.key(), APP_VERSION);
   const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
   return new File([JSON.stringify(data)], `${APP_NAME}-${prefix}-${stamp}${BACKUP_EXTENSION}`, { type: BACKUP_MIME });
@@ -332,6 +332,6 @@ export async function renderSecuritySettings() {
       ? `Wiederherstellungsschlüssel eingerichtet am ${fmt(info.createdAt)}.`
       : 'Kein Wiederherstellungsschlüssel eingerichtet. Ohne ihn sind die Daten bei vergessener Passphrase verloren.' }),
     el('button', { class: 'secondary', id: 'btn-recovery', onclick: setupRecovery }, icon('shield-check'), info ? 'Neuen Schlüssel erstellen' : 'Wiederherstellungsschlüssel erstellen'),
-    info ? el('button', { class: 'danger', onclick: removeRecovery }, 'Schlüssel entfernen') : null);
+    info ? el('button', { class: 'danger', onclick: removeRecovery }, 'Schlüssel entfernen') : '');
   document.querySelector('#backup-status').textContent = backupStatusText();
 }

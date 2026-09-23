@@ -143,11 +143,18 @@ input[type=file]::file-selector-button {
 }
 .entry-meta { display: flex; justify-content: space-between; align-items: center; gap: 12px; color: var(--muted); font-size: .85rem; }
 .entry-text { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-.audio-box { margin-top: 10px; }
+.audio-box { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.audio-box .audio-player { flex: 1 1 100%; }
 .audio-box audio { width: 100%; }
+#transcript-text { width: 100%; box-sizing: border-box; font: inherit; }
 .empty { text-align: center; margin: 40px 16px; }
 .day { color: var(--muted); font-family: var(--font-body); font-size: .8125rem; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; margin: 24px 0 6px; }
 .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0; }
+/* Wahl auf Augenhöhe: Scannen | Selbst eintragen, weitere Knöpfe darunter über die ganze Breite */
+.toolbar.choice { display: grid; grid-template-columns: 1fr 1fr; }
+.toolbar.choice > button { justify-content: center; text-align: center; overflow-wrap: normal; hyphens: manual; }
+@media (max-width: 380px) { .toolbar.choice > button:nth-child(-n+2) { flex-direction: column; gap: 4px; } } /* schmale Handys: Symbol über dem Text, kein Umbruch mitten im Wort */
+.toolbar.choice > button:nth-child(n+3) { grid-column: 1 / -1; }
 .card-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 
 /* Tagebuch */
@@ -347,9 +354,10 @@ button.card-button:hover { border-color: var(--accent); }
 
 /* ---------- Detailansicht / Sheet ---------- */
 .sheet-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.sheet-head > div { min-width: 0; } /* lange Untertitel brechen um statt die Ansicht zu verbreitern (320 px) */
 .sheet-head h2 { margin: 0; font-size: 1.375rem; }
-.sheet-close { margin: -6px -8px 0 0; }
-.sheet-actions button { flex: 1; }
+.sheet-close { margin: -6px 0 0 0; } /* kein negativer Rand rechts: sonst lässt sich jedes Blatt 8 px seitlich scrollen */
+.sheet-actions button { flex: 1; overflow-wrap: normal; hyphens: manual; } /* Knopftexte nur an Leerzeichen umbrechen */
 button.wide { width: 100%; margin-top: 12px; }
 .sheet-head p { margin: 2px 0 0; }
 .sheet-body { margin-top: 12px; }
@@ -500,3 +508,60 @@ details.more-fields > summary {
 .list-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
 .list-title { font-weight: 600; }
 .about { text-align: center; margin: var(--space-6) 0 var(--space-4); }
+
+/* ---------- Texterkennung (DOC-12): Fortschritt und Prüfliste ---------- */
+.ocr-progress { width: 100%; height: 10px; accent-color: var(--accent); }
+.ocr-list { display: grid; gap: var(--space-3); margin: var(--space-3) 0; }
+.ocr-row { border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: var(--radius-control); padding: var(--space-3); background: var(--surface); }
+.ocr-row.unklar { border-left-color: var(--warn-line); }
+.ocr-row-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.ocr-check { display: flex; align-items: center; gap: var(--space-2); margin: 0; min-height: var(--tap); font-weight: 600; min-width: 0; }
+.ocr-check input { width: 22px; height: 22px; flex: none; accent-color: var(--accent); }
+.ocr-name { min-width: 0; }
+.ocr-state { flex: none; font-size: var(--fs-small); padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--text); }
+.ocr-state.unklar { background: var(--warn-bg); }
+.ocr-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 var(--space-2); }
+.ocr-fields .ocr-field:first-child { grid-column: 1 / -1; }
+.ocr-field { margin: 6px 0; font-size: var(--fs-small); }
+.ocr-field input { margin-top: 4px; }
+.ocr-reasons { color: var(--muted); margin: 4px 0; }
+button.link.ocr-source { min-height: var(--tap); font-size: var(--fs-small); overflow-wrap: anywhere; }
+.ocr-figure { position: relative; }
+.ocr-mark { position: absolute; border: 3px solid var(--accent); border-radius: 6px; background: rgba(49, 93, 219, .12); background: color-mix(in srgb, var(--accent) 12%, transparent); pointer-events: none; }
+
+/* Laborwerte-Überblick (Teil D) */
+.insights { border-left: 4px solid var(--area-health); }
+.insights-summary { font-weight: 500; }
+.insights-list li { margin: 6px 0; }
+ol.questions { padding-left: 1.3em; }
+ol.questions li { margin: 0 0 12px; }
+.ocr-date { margin: var(--space-3) 0; }
+button.link.doc-value { min-height: var(--tap); gap: 6px; }
+
+/* Tagebuch-Impulse (R05) */
+.impulse { display: flex; gap: var(--space-3); align-items: flex-start; margin: 0 0 var(--space-3); padding: var(--space-3) var(--space-4); border-radius: var(--radius); background: var(--accent-soft); }
+.impulse > svg.icon { color: var(--accent); margin-top: 3px; }
+.impulse-body { min-width: 0; }
+.impulse-text { margin: 0 0 4px; font-weight: 500; }
+.impulse-actions { display: flex; flex-wrap: wrap; gap: 0 var(--space-4); }
+.impulse-actions button.link { min-height: var(--tap); font-size: var(--fs-small); }
+.reflection-question { font-size: 1.15rem; font-weight: 500; }
+.switch-row { display: flex; gap: var(--space-3); align-items: flex-start; min-height: var(--tap); }
+.switch-row input { width: 22px; height: 22px; flex: none; margin-top: 2px; accent-color: var(--accent); }
+.switch-row > span { display: grid; gap: 2px; font-weight: 400; }
+
+/* Zusatzfunktionen (Mehr) und Hinweis auf „Heute“ */
+.extras-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 10px; }
+.extras-row { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; align-items: start; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.extras-row > .icon { margin-top: 2px; }
+.extras-row .list-text { display: flex; flex-direction: column; min-width: 0; }
+.extras-row .list-title { font-weight: 600; }
+.extras-row.extras-ready > .icon { color: var(--accent); }
+.extras-row > progress, .extras-row > button { grid-column: 2; justify-self: start; }
+.extras-progress { width: 100%; height: 6px; }
+.extras-hint { display: flex; gap: 8px; align-items: flex-start; margin: 0; }
+.extras-hint .icon { flex: none; margin-top: 2px; }
+
+/* Verbindungen (Mehr) */
+.connections-list li { margin: 4px 0; }
+.warn-text { color: var(--warn); }

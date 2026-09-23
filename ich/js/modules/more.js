@@ -6,6 +6,8 @@ import { el, icon } from '../ui/dom.js';
 import { docsFor, docList, openDocument } from './documents.js';
 import { openHealthDoc } from './health.js';
 import { openDetail } from './contracts.js';
+import * as extras from './extras.js';
+import * as connections from './connections.js';
 
 function row({ id, iconName, title, meta, onclick }) {
   return el('li', {},
@@ -26,7 +28,7 @@ export function render(root, ctx) {
   };
   const status = ctx.backupStatus();
 
-  root.replaceChildren(
+  root.replaceChildren(...[ // null (z. B. Verbindungen ohne Client-ID) auslassen
     el('section', { class: 'more-section', 'aria-labelledby': 'more-docs' },
       el('h2', { id: 'more-docs' }, icon('file-text'), 'Dokumente'),
       healthDocs.length || contractDocs.length ? null
@@ -42,5 +44,8 @@ export function render(root, ctx) {
           meta: ctx.backupStatusText(), onclick: () => ctx.openSettings('backup') }),
         row({ id: 'btn-settings', iconName: 'settings', title: 'Einstellungen',
           meta: 'Erscheinungsbild, Sperre, Wiederherstellung, Tarifcheck', onclick: () => ctx.openSettings() }))),
-    el('p', { class: 'muted small about', text: `${APP_NAME} ${APP_VERSION} · Alle Inhalte liegen verschlüsselt auf diesem Gerät.` }));
+    connections.section(ctx),
+    extras.section(),
+    el('p', { class: 'muted small about', text: `${APP_NAME} ${APP_VERSION} · Alle Inhalte liegen verschlüsselt auf diesem Gerät.` }),
+  ].filter(Boolean));
 }

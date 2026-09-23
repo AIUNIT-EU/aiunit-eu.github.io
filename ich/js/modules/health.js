@@ -2,19 +2,14 @@
 // Nur Dokumentation. Die App bewertet keine Werte medizinisch; Referenzbereiche stammen aus dem Befund.
 
 import { formatDE } from '../lib/dates.js';
-import { openForm } from '../ui/form.js';
+import { openForm, openSheet } from '../ui/form.js';
 import { el, icon, num } from '../ui/dom.js';
 import { lineChart } from '../ui/chart.js';
-import { docsFor, docList, openDocument, startScan, pageStrip, onDocumentSaved } from './documents.js';
+import { docsFor, docList, openDocument, startScan, pageStrip, onDocumentSaved, recognizeDocument, markablePages } from './documents.js';
+import { parseLabPages, findReportDate } from '../lib/parse-lab.js';
+import { labInsights, notesFor, doctorQuestions } from '../lib/lab-insights.js';
+import { LAB_PARAMETERS, UNITS } from '../lib/lab-catalog.js';
 
-const LAB_PARAMETERS = [
-  'Hämoglobin', 'Hämatokrit', 'Erythrozyten', 'Leukozyten', 'Thrombozyten', 'HbA1c', 'Glukose (nüchtern)',
-  'Cholesterin gesamt', 'LDL-Cholesterin', 'HDL-Cholesterin', 'Triglyceride', 'Lipoprotein(a)', 'Kreatinin', 'eGFR',
-  'Harnsäure', 'GOT (AST)', 'GPT (ALT)', 'Gamma-GT', 'CRP', 'TSH', 'fT3', 'fT4', 'Ferritin', 'Eisen', 'Transferrinsättigung',
-  'Vitamin D (25-OH)', 'Vitamin B12', 'Holo-TC', 'Folsäure', 'Magnesium', 'Kalium', 'Natrium', 'Kalzium', 'Zink', 'Selen',
-  'Omega-3-Index', 'Homocystein', 'Testosteron', 'PSA',
-];
-const UNITS = ['g/dl', 'mg/dl', 'mmol/l', 'µmol/l', 'µg/l', 'ng/ml', 'pg/ml', 'nmol/l', 'pmol/l', '%', 'U/l', 'mU/l', '/nl', '/pl', 'ml/min'];
 const SUPPLEMENTS = ['Vitamin D3', 'Vitamin D3 + K2', 'Magnesium', 'Omega-3', 'Zink', 'Vitamin B12', 'Eisen', 'Kreatin',
   'Vitamin C', 'Selen', 'Jod', 'Folsäure', 'Kalzium', 'Probiotikum'];
 
@@ -73,7 +68,9 @@ function editLab(ctx, entry, preset = {}, { before = [], after = null } = {}) {
 const FLAG_TEXT = { hoch: '↑ über Referenz', niedrig: '↓ unter Referenz', ok: 'im Referenzbereich' };
 
 function valueText(e) {
-  return `${num.format(e.value)}${e.unit ? ` ${e.unit}` : ''}`;
+  // Originalwert aus dem Befund (z. B. „< 0,5“) hat Vorrang vor der Zahl (HEA-01)
+  const shown = e.valueText && /[<>]/.test(e.valueText) ? e.valueText : num.format(e.value);
+  return `${shown}${e.unit ? ` ${e.unit}` : ''}`;
 }
 
 function refText(e) {
@@ -91,12 +88,15 @@ function renderLab(ctx) {
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(e);
   }
-  const nodes = [el('div', { class: 'toolbar' },
-    el('button', { class: 'primary', id: 'btn-add-lab', onclick: () => editLab(ctx, null) }, icon('plus'), 'Laborwert'))];
+  const nodes = [el('div', { class: 'toolbar choice' }, // „Scannen“ und „Selbst eintragen“ gleich groß nebeneinander
+    // Direkter Weg: Befund fotografieren → Werte werden auf dem Gerät erkannt → prüfen → übernehmen
+    el('button', { class: 'primary', id: 'btn-scan-labs', onclick: () => startScan({ area: 'health', onSaved: doc => scanLabValues(ctx, doc) }) }, icon('camera'), 'Laborwerte scannen'),
+    el('button', { class: 'secondary', id: 'btn-add-lab', onclick: () => editLab(ctx, null) }, icon('pencil'), 'Selbst eintragen'))];
   if (!groups.size) {
-    nodes.push(el('p', { class: 'muted empty', text: 'Noch keine Blutwerte. Trage die Werte aus deinem Laborbefund ein, um den Verlauf zu sehen.' }));
+    nodes.push(el('p', { class: 'muted empty', text: 'Noch keine Blutwerte. „Laborwerte scannen“: Befund fotografieren, die App erkennt die Werte auf dem Gerät, du prüfst und übernimmst sie. „Selbst eintragen“: einen Wert von Hand erfassen. Beides lässt sich später bearbeiten.' }));
     return nodes;
   }
+  nodes.push(insightsCard(ctx));
   const sorted = [...groups.values()]
     .map(list => list.sort((a, b) => b.date.localeCompare(a.date)))
     .sort((a, b) => a[0].parameter.localeCompare(b[0].parameter, 'de'));
@@ -202,11 +202,63 @@ function renderMeds(ctx, kind) {
   return nodes;
 }
 
+// ---------- Überblick und Fragen für den Arzttermin (lokal, ohne KI, keine Diagnose) ----------
+
+const DISCLAIMER = 'Keine medizinische Bewertung. Die App vergleicht nur mit den Angaben deines Labors und mit deinen früheren Werten.';
+
+function insightsCard(ctx) {
+  const r = labInsights(ctx.records, ctx.today());
+  const s = r.summary;
+  const parts = [
+    s.outside.length ? `${s.outside.length} außerhalb des Referenzbereichs` : null,
+    s.changed.length ? `${s.changed.length} deutlich verändert` : null,
+    s.stale.length ? `${s.stale.length} seit über 12 Monaten nicht gemessen` : null,
+    s.incomparable.length ? `${s.incomparable.length} mit Vorwert nicht vergleichbar` : null,
+    s.readChecks.length ? `${s.readChecks.length} bitte Eingabe prüfen` : null,
+  ].filter(Boolean);
+  const flagged = r.items.filter(i => notesFor(i).length);
+  const questions = doctorQuestions(r);
+  return el('article', { class: 'entry insights', id: 'lab-insights' },
+    el('div', { class: 'entry-meta' }, el('strong', { text: 'Überblick' }), el('span', { class: 'muted small', text: `${s.total} ${s.total === 1 ? 'Laborwert' : 'Laborwerte'}` })),
+    el('p', { class: 'insights-summary', text: parts.length ? `${parts.join(', ')}.` : 'Alle neuesten Werte liegen im Referenzbereich deines Labors, ohne deutliche Veränderung.' }),
+    flagged.length ? el('details', {},
+      el('summary', { text: 'Einzelheiten' }),
+      el('ul', { class: 'plain-list insights-list' }, flagged.map(i => el('li', {},
+        el('strong', { text: `${i.parameter}: ` }), notesFor(i).join('; '))))) : null,
+    questions.length ? el('button', { class: 'secondary small', id: 'btn-doctor-questions', onclick: () => showDoctorQuestions(ctx, questions) },
+      icon('file-text'), 'Fragen für den Arzttermin') : null,
+    el('p', { class: 'muted small', text: DISCLAIMER }));
+}
+
+function showDoctorQuestions(ctx, questions) {
+  const text = `Fragen für den Arzttermin (erstellt mit ICH am ${formatDE(ctx.today())}):\n\n${questions.map((q, i) => `${i + 1}. ${q}`).join('\n')}\n\n${DISCLAIMER}`;
+  const copy = el('button', { type: 'button', class: 'secondary', id: 'btn-questions-copy', onclick: async () => {
+    try { await navigator.clipboard.writeText(text); ctx.toast('Fragen kopiert'); } catch { ctx.toast('Kopieren nicht möglich. Bitte den Text markieren und kopieren.'); }
+  } }, 'Kopieren');
+  const share = typeof navigator.share === 'function' ? el('button', { type: 'button', class: 'primary', id: 'btn-questions-share', onclick: async () => {
+    try { await navigator.share({ title: 'Fragen für den Arzttermin', text }); } catch { /* abgebrochen */ }
+  } }, 'Teilen') : null;
+  openSheet({
+    title: 'Fragen für den Arzttermin',
+    subtitle: 'zu den auffälligen Werten',
+    body: [
+      el('ol', { class: 'questions' }, questions.map(q => el('li', { text: q }))),
+      el('p', { class: 'muted small', text: `${DISCLAIMER} Die Fragen verlassen das Handy nur, wenn du sie selbst kopierst oder teilst.` }),
+    ],
+    actions: [copy, share].filter(Boolean),
+  });
+}
+
 // ---------- Befunde (gescannte Dokumente) ----------
 
 export function openHealthDoc(ctx, id) {
   const doc = ctx.records.find(r => r.id === id);
-  openDocument(id, { actions: [
+  const hasValues = ctx.records.some(r => r.module === 'lab' && r.docId === id);
+  openDocument(id, {
+    // Eingetragene Werte antippen: bearbeiten mit dem Befund als Bild darüber (falsch gescannt → korrigieren)
+    onValue: lab => editLab(ctx, lab, {}, { before: [pageStrip(doc)], after: () => openHealthDoc(ctx, id) }),
+    actions: [
+    el('button', { type: 'button', class: 'primary', id: 'btn-doc-ocr', onclick: () => scanLabValues(ctx, doc) }, icon('scan-text'), hasValues ? 'Erneut erkennen' : 'Werte erkennen'),
     el('button', { type: 'button', class: 'primary', id: 'btn-doc-lab', onclick: () => editLab(ctx, null, { date: doc.docDate, source: doc.source, docId: doc.id },
       { before: [pageStrip(doc)], after: () => openHealthDoc(ctx, id) }) }, icon('plus'), 'Laborwert eintragen'),
   ] });
@@ -214,12 +266,125 @@ export function openHealthDoc(ctx, id) {
 
 onDocumentSaved('health', (doc, ctx) => { section = 'docs'; ctx.showTab('health'); });
 
+// ---------- Werte aus einem Befund erkennen (lokal, DOC-12) ----------
+
+async function scanLabValues(ctx, doc) {
+  const pages = await recognizeDocument(doc);
+  if (!pages) return;
+  const fresh = ctx.records.find(r => r.id === doc.id) || doc;
+  // Schon aus diesem Befund übernommene Werte markieren, damit „Erneut erkennen“ nichts doppelt speichert
+  const existing = new Map(ctx.records.filter(r => r.module === 'lab' && r.docId === fresh.id).map(r => [r.parameter.trim().toLowerCase(), r]));
+  const candidates = parseLabPages(pages).map(c => {
+    const already = existing.get(c.parameter.trim().toLowerCase());
+    return already ? { ...c, already, state: 'unklar', reasons: [`bereits eingetragen: ${valueText(already)}`, ...c.reasons] } : c;
+  });
+  reviewLabValues(ctx, fresh, candidates, { reportDate: findReportDate(pages) });
+}
+
+const parseDe = s => {
+  const t = String(s ?? '').trim().replace(/^[<>≤≥]\s*/, '');
+  if (!t) return null;
+  const n = Number(t.includes(',') ? t.replace(/\./g, '').replace(',', '.') : t);
+  return Number.isFinite(n) ? n : NaN;
+};
+
+/** Prüfliste: Jede erkannte Zeile ist ein Vorschlag. Unklare Zeilen sind nicht vorausgewählt. */
+function reviewLabValues(ctx, doc, candidates, { reportDate = null } = {}) {
+  const back = () => openHealthDoc(ctx, doc.id);
+  if (!candidates.length) {
+    openSheet({
+      title: 'Keine Laborwerte erkannt',
+      body: [el('p', { text: 'Auf den Seiten wurden keine Zeilen mit Laborwert, Zahl und Einheit gefunden. Häufige Ursachen: unscharfes Foto, sehr kleine Schrift oder ein ungewöhnliches Tabellenformat.' }),
+        el('p', { class: 'muted small', text: 'Du kannst die Werte wie bisher mit „Laborwert eintragen“ selbst übernehmen; der Befund bleibt dabei sichtbar.' })],
+      actions: [el('button', { type: 'button', class: 'primary', onclick: back }, 'Zurück zum Befund')],
+    });
+    return;
+  }
+  const { node: pagesNode, mark } = markablePages(doc);
+  const rows = candidates.map((c, i) => {
+    const check = el('input', { type: 'checkbox', 'aria-label': `${c.parameter} übernehmen` });
+    check.checked = c.state === 'erkannt';
+    const field = (name, value, label, extra = {}) => el('label', { class: 'ocr-field' }, label,
+      el('input', { type: 'text', name, value: value ?? '', inputmode: extra.numeric ? 'decimal' : undefined, autocomplete: 'off' }));
+    const row = el('article', { class: `ocr-row ${c.state}`, 'data-index': String(i) },
+      el('div', { class: 'ocr-row-head' },
+        el('label', { class: 'ocr-check' }, check, el('span', { class: 'ocr-name', text: c.parameter })),
+        el('span', { class: `ocr-state ${c.state}`, text: c.state === 'erkannt' ? 'erkannt' : 'unklar' })),
+      el('div', { class: 'ocr-fields' },
+        field('parameter', c.parameter, 'Laborwert'),
+        field('value', c.valueText, 'Wert', { numeric: true }),
+        field('unit', c.unit, 'Einheit'),
+        field('refLow', c.refLow != null ? num.format(c.refLow) : '', 'Ref. von', { numeric: true }),
+        field('refHigh', c.refHigh != null ? num.format(c.refHigh) : '', 'Ref. bis', { numeric: true })),
+      [...c.reasons, ...(c.notes || [])].length ? el('p', { class: 'ocr-reasons small', text: [...c.reasons, ...(c.notes || [])].join(' · ') }) : null,
+      el('button', { type: 'button', class: 'link ocr-source', onclick: () => mark(c.page, c.bbox) }, `Im Befund zeigen: „${c.line}“`));
+    return { row, check, c };
+  });
+  const error = el('p', { class: 'error', role: 'alert' });
+  // Datum der Blutabnahme: aus dem Befundtext erkannt oder Datum des Dokuments; gilt für alle übernommenen Werte
+  const dateInput = el('input', { type: 'date', name: 'labDate', value: reportDate || doc.docDate || ctx.today(), required: true });
+  const dateBox = el('label', { class: 'ocr-date' }, 'Datum der Blutabnahme', dateInput,
+    el('span', { class: 'hint', text: reportDate ? `aus dem Befund erkannt (${formatDE(reportDate)}), bitte prüfen` : 'Datum des Befunds; bei Bedarf ändern' }));
+  const save = el('button', { type: 'button', class: 'primary', id: 'btn-ocr-apply' }, 'Übernehmen');
+  const count = () => { const n = rows.filter(r => r.check.checked).length; save.textContent = `Übernehmen (${n})`; save.disabled = !n; };
+  rows.forEach(r => r.check.addEventListener('change', count));
+  count();
+  save.onclick = async () => {
+    error.textContent = '';
+    const labDate = dateInput.value;
+    if (!labDate) { error.textContent = 'Bitte das Datum der Blutabnahme angeben.'; return; }
+    const chosen = [];
+    for (const r of rows.filter(x => x.check.checked)) {
+      const get = n => r.row.querySelector(`[name=${n}]`).value.trim();
+      const parameter = get('parameter');
+      const valueRaw = get('value');
+      const value = parseDe(valueRaw);
+      const refLow = parseDe(get('refLow'));
+      const refHigh = parseDe(get('refHigh'));
+      if (!parameter || value === null || Number.isNaN(value)) { error.textContent = `„${parameter || 'Zeile'}“: Laborwert und Wert müssen ausgefüllt sein.`; r.row.scrollIntoView?.({ block: 'center' }); return; }
+      if (Number.isNaN(refLow) || Number.isNaN(refHigh)) { error.textContent = `„${parameter}“: Referenz ist keine Zahl.`; return; }
+      if (refLow !== null && refHigh !== null && refLow > refHigh) { error.textContent = `„${parameter}“: „Ref. von“ ist größer als „Ref. bis“.`; return; }
+      chosen.push({ module: 'lab', date: labDate, source: doc.source || null, docId: doc.id, parameter, value,
+        valueText: valueRaw, unit: get('unit') || null, refLow, refHigh, notes: null, origin: 'scan-bestaetigt' });
+    }
+    save.disabled = true;
+    try {
+      for (const rec of chosen) await ctx.save(rec, { silent: true });
+      // Befund ohne eigenes Datum (heute vorbelegt) übernimmt das bestätigte Abnahmedatum
+      if (labDate !== doc.docDate && doc.docDate === (doc.createdAt || '').slice(0, 10)) await ctx.save({ ...doc, docDate: labDate }, { silent: true });
+    } catch (err) {
+      error.textContent = err.message || 'Speichern fehlgeschlagen.';
+      save.disabled = false;
+      return;
+    }
+    // Gespeichert wurde still (das Blatt bleibt offen); die Blutwerte-Ansicht dahinter jetzt einmal neu aufbauen
+    const tab = document.getElementById('tab-health');
+    if (tab && !tab.hidden) render(tab, ctx);
+    ctx.toast(`${chosen.length} ${chosen.length === 1 ? 'Laborwert' : 'Laborwerte'} übernommen`);
+    back();
+  };
+  const unclear = candidates.filter(c => c.state !== 'erkannt').length;
+  openSheet({
+    title: 'Erkannte Werte prüfen',
+    subtitle: `${candidates.length} gefunden${unclear ? `, davon ${unclear} unklar` : ''} · nichts ist gespeichert`,
+    body: [
+      el('p', { class: 'muted small', text: 'Vergleiche jeden Wert mit dem Befund. Unklare Zeilen sind nicht ausgewählt. Die App deutet keine Werte.' }),
+      dateBox,
+      el('div', { class: 'ocr-list' }, rows.map(r => r.row)),
+      error,
+      el('h3', { text: 'Befund' }),
+      pagesNode,
+    ],
+    actions: [el('button', { type: 'button', class: 'secondary', onclick: back }, 'Verwerfen'), save],
+  });
+}
+
 function renderDocs(ctx) {
   const docs = docsFor(ctx.records, 'health');
   const nodes = [el('div', { class: 'toolbar' },
     el('button', { class: 'primary', id: 'btn-scan-health', onclick: () => startScan({ area: 'health' }) }, icon('camera'), 'Befund scannen'))];
   if (!docs.length) {
-    nodes.push(el('p', { class: 'muted empty', text: 'Noch keine Befunde. Fotografiere einen Laborbefund oder Arztbrief Seite für Seite. Die Werte trägst du danach selbst ein, die App liest nichts automatisch aus.' }));
+    nodes.push(el('p', { class: 'muted empty', text: 'Noch keine Befunde. Fotografiere einen Laborbefund oder Arztbrief Seite für Seite. Danach kann die App die Werte auf dem Gerät erkennen; du prüfst sie, bevor etwas gespeichert wird.' }));
     return nodes;
   }
   nodes.push(docList(docs, id => openHealthDoc(ctx, id)));
@@ -238,7 +403,7 @@ export function render(root, ctx) {
   root.replaceChildren(
     tabs,
     el('p', { class: 'muted small', text: 'Nur zur persönlichen Dokumentation, keine medizinische Bewertung.' }),
-    ...body);
+    ...body.filter(Boolean)); // replaceChildren würde null als Text „null“ anzeigen
 }
 
 // ---------- Für die Übersicht ----------

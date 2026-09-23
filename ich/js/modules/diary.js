@@ -5,9 +5,12 @@
 // occurredAt/tz beschreiben, WANN das Erlebte war (rückdatierbar); createdAt bleibt der echte Erstellungszeitpunkt.
 
 import { AUDIO_MAX_SECONDS } from '../config.js';
-import { openForm } from '../ui/form.js';
 import { el, icon } from '../ui/dom.js';
 import { localDateIn, inDateRange, formatDE } from '../lib/dates.js';
+import { questionFor } from '../lib/impulses.js';
+import { impulseCard } from './overview.js';
+import { openForm, openSheet, closeForm } from '../ui/form.js';
+import * as asr from '../lib/transcribe.js';
 
 const MOODS = ['sehr gut', 'gut', 'neutral', 'schlecht', 'sehr schlecht'];
 const $ = sel => document.querySelector(sel);
@@ -22,6 +25,8 @@ const st = {
   from: null, // Zeitraumfilter (Kalendertage, einschließlich), null = offen
   to: null,
   draftTimer: null,
+  asrInfoShown: false, // Hinweis „läuft nur auf diesem Handy“ einmal je Sitzung
+  asrRun: 0,           // laufende Umwandlung; abgebrochene Läufe werden verworfen
 };
 
 const localTz = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Berlin';
@@ -90,7 +95,7 @@ function toOccurred(date, time) {
   return d.toISOString();
 }
 
-export function editEntry(entry) {
+export function editEntry(entry, preset = {}) {
   const ctx = st.ctx;
   const parts = entry ? dateTimeParts(entry) : dateTimeParts({ createdAt: new Date().toISOString() });
   openForm({
@@ -98,7 +103,7 @@ export function editEntry(entry) {
     fields: entryFields(allTags(), entry ? !!entry.audio : null),
     values: entry
       ? { title: entry.title, text: entry.text, tags: (entry.tags || []).join(', '), mood: entry.mood || '', ...parts, audio: entry.audio ? 'keep' : 'none' }
-      : { text: $('#entry-text').value, ...parts },
+      : { text: $('#entry-text').value, ...parts, ...preset },
     note: entry ? `Erstellt am ${new Date(entry.createdAt).toLocaleString('de-DE')}. Dieser Zeitpunkt bleibt erhalten.` : null,
     onSave: async data => {
       if (!data.text && !data.title && !entry?.audio) throw new Error('Bitte einen Text oder Titel eingeben.');
@@ -186,6 +191,23 @@ async function onSaveText(e) {
   $('#entry-text').value = '';
   await clearDraft().catch(() => {});
   st.ctx.toast('Eintrag gespeichert');
+  offerReflection();
+}
+
+/** Reflexionshilfe (R05): nur wenn eingeschaltet, eine Frage nach dem Speichern; wertet keine Einträge aus. */
+function offerReflection() {
+  if (!st.ctx.prefs().reflection) return;
+  const today = st.ctx.today();
+  const q = questionFor(today, st.reflectionSeed = (st.reflectionSeed || 0) + 1);
+  openSheet({
+    title: 'Zum Weiterdenken',
+    subtitle: 'freiwillig',
+    body: [el('p', { class: 'reflection-question', text: q })],
+    actions: [
+      el('button', { type: 'button', class: 'secondary', id: 'btn-reflection-skip', onclick: () => closeForm() }, 'Überspringen'),
+      el('button', { type: 'button', class: 'primary', id: 'btn-reflection-answer', onclick: () => { closeForm(); editEntry(null, { title: q }); } }, 'Beantworten'),
+    ],
+  });
 }
 
 // ---------- Sprachaufnahme ----------
@@ -286,7 +308,112 @@ function renderReview() {
     el('div', { class: 'review-actions' },
       el('button', { type: 'button', class: 'secondary', onclick: () => { st.replaceFor = null; discardPending(); } }, icon('trash-2'), 'Verwerfen'),
       el('button', { type: 'button', class: 'secondary', onclick: () => { discardPending(); startRecording(); } }, icon('mic'), 'Neu aufnehmen'),
+      target() ? null : el('button', { type: 'button', class: 'secondary', id: 'btn-transcribe-pending', onclick: transcribePending }, icon('file-text'), 'In Text umwandeln'),
       el('button', { type: 'button', class: 'primary', id: 'btn-save-audio', onclick: savePending }, 'Speichern')));
+}
+
+// ---------- In Text umwandeln (lokal, ADR-0008) ----------
+
+/**
+ * Wandelt eine Aufnahme auf dem Gerät in Text um und zeigt das Ergebnis bearbeitbar an.
+ * onApply(text) wird erst nach „Übernehmen“ aufgerufen; vorher wird nichts gespeichert.
+ */
+async function transcribeAudio(blob, { onApply, applyLabel }) {
+  if (!st.asrInfoShown) {
+    const ok = confirm('Die Umwandlung in Text läuft nur auf diesem Handy. Die Aufnahme wird nicht hochgeladen.\n\nDer erkannte Text ist ein Vorschlag: Du kannst ihn ändern, bevor er gespeichert wird.');
+    if (!ok) return;
+    st.asrInfoShown = true;
+  }
+  const run = ++st.asrRun;
+  const status = el('p', { class: 'ocr-status', role: 'status', text: 'Wird vorbereitet …' });
+  const bar = el('progress', { class: 'ocr-progress', max: '100' }); // ohne value: läuft, Dauer unbekannt
+  const cancel = () => { st.asrRun++; asr.stop(); closeForm(); };
+  openSheet({
+    title: 'Sprachnotiz wird umgewandelt',
+    subtitle: 'nur auf diesem Gerät',
+    body: [status, bar, el('p', { class: 'muted small', text: 'Das dauert etwa so lange wie die Aufnahme, beim ersten Mal länger. Undeutliche Stellen werden oft falsch erkannt.' })],
+    actions: [el('button', { type: 'button', class: 'secondary', id: 'btn-transcribe-cancel', onclick: cancel }, 'Abbrechen')],
+  });
+  const dlg = document.getElementById('editor');
+  const onClose = () => { if (run === st.asrRun) cancel(); }; // Schließen (X, Esc) bricht ebenfalls ab
+  dlg.addEventListener('close', onClose, { once: true });
+  let text;
+  try {
+    text = await asr.transcribe(blob, {
+      onProgress: p => {
+        if (run !== st.asrRun) return;
+        if (p.phase === 'load') { status.textContent = 'Erkennungsdaten werden geladen …'; bar.value = String(Math.round((p.progress || 0) * 100)); }
+        else { status.textContent = 'Sprache wird erkannt …'; bar.removeAttribute('value'); }
+      },
+    });
+  } catch (err) {
+    if (run !== st.asrRun || err.name === 'AbortError') return;
+    dlg.removeEventListener('close', onClose);
+    st.asrRun++;
+    asr.stop();
+    closeForm();
+    st.ctx.toast(`Umwandlung fehlgeschlagen: ${err.message || err}`);
+    return;
+  }
+  dlg.removeEventListener('close', onClose);
+  if (run !== st.asrRun || st.ctx.isLocked()) return;
+  st.asrRun++;
+  asr.stop(); // Modell nicht im Speicher halten; das nächste Mal lädt es aus dem Offline-Speicher
+  const area = el('textarea', { id: 'transcript-text', rows: '6', 'aria-label': 'Erkannter Text' });
+  area.value = text;
+  openSheet({
+    title: 'Erkannter Text',
+    subtitle: 'bitte prüfen und bei Bedarf ändern',
+    body: [
+      text ? null : el('p', { class: 'muted', text: 'Es wurde keine Sprache erkannt. Du kannst den Text selbst eingeben.' }),
+      area,
+    ],
+    actions: [
+      el('button', { type: 'button', class: 'secondary', onclick: closeForm }, 'Verwerfen'),
+      el('button', { type: 'button', class: 'primary', id: 'btn-transcript-apply', onclick: async () => {
+        const t = area.value.trim();
+        if (!t) { closeForm(); return; }
+        try {
+          await onApply(t);
+          closeForm();
+        } catch (err) {
+          st.ctx.toast(err.message || 'Speichern fehlgeschlagen.');
+        }
+      } }, applyLabel),
+    ],
+  });
+  area.focus();
+}
+
+const appendText = (base, add) => (base ? `${base.replace(/\s+$/, '')}\n\n${add}` : add);
+
+/** Neue Aufnahme: Text ins Eingabefeld übernehmen, gespeichert wird mit „Speichern“. */
+function transcribePending() {
+  const p = st.pending;
+  if (!p) return;
+  transcribeAudio(p.blob, {
+    applyLabel: 'In das Textfeld übernehmen',
+    onApply: async t => {
+      const box = $('#entry-text');
+      box.value = appendText(box.value.trim(), t);
+      scheduleDraft();
+      st.ctx.toast('Text übernommen. Mit „Speichern“ wird beides gespeichert.');
+    },
+  });
+}
+
+/** Bestehender Eintrag: Text anhängen und speichern (verschlüsselt wie jeder Eintragstext). */
+async function transcribeEntry(entry) {
+  const bytes = await st.ctx.loadBlob(entry.audio.blobId);
+  if (!bytes) { st.ctx.toast('Aufnahme nicht gefunden.'); return; }
+  transcribeAudio(new Blob([bytes], { type: entry.audio.mime }), {
+    applyLabel: 'Zum Eintrag hinzufügen',
+    onApply: async t => {
+      const current = st.ctx.records.find(r => r.id === entry.id) || entry;
+      await st.ctx.save({ ...current, text: appendText(current.text || '', t) });
+      st.ctx.toast('Text zum Eintrag hinzugefügt');
+    },
+  });
 }
 
 const target = () => st.replaceFor && st.ctx.records.find(r => r.id === st.replaceFor && r.module === 'diary');
@@ -335,6 +462,7 @@ async function savePending() {
   $('#entry-text').value = '';
   await clearDraft().catch(() => {});
   st.ctx.toast('Sprachnotiz gespeichert');
+  offerReflection(); // wie bei Textnotizen, nur wenn eingeschaltet
 }
 
 function discardPending() {
@@ -388,12 +516,13 @@ export function render() {
     .sort((a, b) => occurred(b).localeCompare(occurred(a)));
 
   const root = $('#entries');
+  const impulse = impulseCard(st.ctx, render, 'diary-'); // nur wenn eingeschaltet
   if (!list.length) {
     const rangeText = ranged ? ` im Zeitraum ${rangeLabel()}` : '';
-    root.replaceChildren(el('p', { class: 'muted empty', text: q || st.tag || ranged ? `Keine Treffer${rangeText}.` : 'Noch keine Einträge. Schreib etwas oder starte eine Aufnahme.' }));
+    root.replaceChildren(...[impulse, el('p', { class: 'muted empty', text: q || st.tag || ranged ? `Keine Treffer${rangeText}.` : 'Noch keine Einträge. Schreib etwas oder starte eine Aufnahme.' })].filter(Boolean));
     return;
   }
-  const nodes = [];
+  const nodes = impulse ? [impulse] : [];
   let lastDay = '';
   for (const entry of list) {
     const day = dayLabel(entry);
@@ -408,7 +537,9 @@ export function render() {
     }
     const backdated = entry.occurredAt && entry.occurredAt.slice(0, 10) !== entry.createdAt.slice(0, 10);
     const box = entry.audio ? el('div', { class: 'audio-box' },
-      el('button', { class: 'secondary small', onclick: e => playAudio(entry, e.currentTarget.parentElement) }, icon('play'), `Sprachnotiz (${mmss(entry.audio.durationSec)})`)) : null;
+      el('div', { class: 'audio-player' },
+        el('button', { class: 'secondary small', onclick: e => playAudio(entry, e.currentTarget.parentElement) }, icon('play'), `Sprachnotiz (${mmss(entry.audio.durationSec)})`)),
+      el('button', { class: 'secondary small btn-transcribe', onclick: () => transcribeEntry(entry) }, icon('file-text'), 'In Text umwandeln')) : null;
     nodes.push(el('article', { class: 'entry diary-entry' },
       el('div', { class: 'entry-meta' },
         el('time', { datetime: occurred(entry), text: `${timeLabel(entry)} Uhr${backdated ? ' · nachgetragen' : ''}` }),
@@ -450,6 +581,8 @@ export const startRecordingFromOverview = () => startRecording();
 /** Beim Sperren: Aufnahme verwerfen, Mikrofon beenden, Blob-URLs widerrufen, Anzeige leeren. */
 export function onLock() {
   st.replaceFor = null;
+  st.asrRun++;
+  asr.stop(); // Modell und erkannter Text verschwinden aus dem Arbeitsspeicher
   if (st.recorder) stopRecording(true);
   discardPending();
   clearTimeout(st.draftTimer);

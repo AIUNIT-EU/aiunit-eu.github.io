@@ -8,6 +8,19 @@
 
 import { addDays, addMonths, daysBetween } from './dates.js';
 
+/** Vertragskategorien (Auswahl im Formular, Zuordnung bei der Texterkennung). */
+export const CONTRACT_CATEGORIES = [
+  'Versicherung',
+  'Strom / Gas / Energie',
+  'Wasser',
+  'Telefon / Internet / Mobilfunk',
+  'Abo / Streaming',
+  'Miete / Wohnen',
+  'Kredit / Finanzen',
+  'Mitgliedschaft',
+  'Sonstiges',
+];
+
 export const INTERVALS = {
   'monatlich': 1,
   'vierteljährlich': 3,

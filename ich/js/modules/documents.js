@@ -4,19 +4,21 @@
 //              docDate, source, note, pages: [{ blobId, mime, w, h, bytes }] }
 // Jede Seite wird sofort nach der Aufnahme verschlüsselt gespeichert und in einem angefangenen Scan
 // (Konfigurationsdatensatz 'scan') gemerkt. So gehen keine Seiten verloren, falls das Handy die App beim
-// Öffnen der Kamera beendet. Die App liest keine Werte aus den Bildern aus (keine OCR).
+// Öffnen der Kamera beendet. Auf Wunsch erkennt die App Text lokal auf dem Gerät (recognizeDocument, ADR-0007);
+// erkannte Werte sind nur Vorschläge und werden erst nach Bestätigung gespeichert.
 
 import { SCAN_LIMITS, processImage } from '../lib/image.js';
 import { formatDE } from '../lib/dates.js';
 import { openForm, openSheet, closeForm } from '../ui/form.js';
 import { el, icon, num } from '../ui/dom.js';
+import * as ocr from '../lib/ocr.js';
 
 export const KINDS = {
   health: ['Laborbefund', 'Arztbrief', 'Sonstiger Befund', 'Rezept', 'Impfnachweis', 'Sonstiges'],
   contracts: ['Police / Vertrag', 'Rechnung', 'Beitragsanpassung', 'Kündigung / Bestätigung', 'Schriftverkehr', 'Sonstiges'],
 };
 
-const st = { ctx: null, urls: new Map(), busy: false, onSaved: null };
+const st = { ctx: null, urls: new Map(), busy: false, onSaved: null, ocrInfoShown: false, ocrCancelled: false };
 const afterSaveByArea = {}; // Rücksprung je Bereich, gilt auch für einen nach dem Neuladen fortgesetzten Scan
 
 /** Bereich registriert, wohin es nach dem Speichern geht: fn(doc, ctx). */
@@ -273,6 +275,74 @@ export function resumeDraft() {
   return true;
 }
 
+// ---------- Texterkennung (lokal, DOC-12) ----------
+
+/**
+ * Erkennt Text auf allen Seiten eines Dokuments, nur auf diesem Gerät. Zeigt Fortschritt und „Abbrechen“.
+ * Ergebnis: [{ lines: [{ text, bbox, confidence }] }] je Seite, oder null bei Abbruch, Ablehnung oder Sperre.
+ */
+export async function recognizeDocument(doc) {
+  if (!st.ocrInfoShown) {
+    const ok = confirm('Die Texterkennung läuft nur auf diesem Handy. Es wird nichts hochgeladen.\n\nErkannte Werte sind Vorschläge: Du prüfst sie, bevor etwas gespeichert wird.');
+    if (!ok) return null;
+    st.ocrInfoShown = true;
+  }
+  st.ocrCancelled = false;
+  const status = el('p', { class: 'ocr-status', role: 'status', text: 'Erkennung wird vorbereitet …' });
+  const bar = el('progress', { class: 'ocr-progress', max: '100', value: '0' });
+  openSheet({
+    title: 'Text wird erkannt',
+    subtitle: 'nur auf diesem Gerät',
+    body: [status, bar, el('p', { class: 'muted small', text: 'Das dauert je Seite meist wenige Sekunden. Kleine oder unscharfe Schrift wird schlechter erkannt.' })],
+    actions: [el('button', { type: 'button', class: 'secondary', id: 'btn-ocr-cancel', onclick: () => { st.ocrCancelled = true; ocr.stop(); closeForm(); } }, 'Abbrechen')],
+  });
+  const pages = [];
+  try {
+    for (let i = 0; i < doc.pages.length; i++) {
+      if (st.ocrCancelled || st.ctx.isLocked()) return null;
+      const page = doc.pages[i];
+      const bytes = await st.ctx.loadBlob(page.blobId);
+      if (!bytes) throw new Error(`Seite ${i + 1} wurde nicht gefunden.`);
+      status.textContent = `Seite ${i + 1} von ${doc.pages.length} …`;
+      const result = await ocr.recognize(new Blob([bytes], { type: page.mime }), {
+        onProgress: p => { bar.value = String(Math.round(((i + p) / doc.pages.length) * 100)); },
+      });
+      pages.push({ lines: result.lines });
+    }
+    return st.ocrCancelled || st.ctx.isLocked() ? null : pages;
+  } catch (err) {
+    if (st.ocrCancelled || st.ctx.isLocked()) return null;
+    closeForm();
+    st.ctx.toast(`Texterkennung nicht möglich: ${err?.message || err}. Du kannst die Werte weiterhin selbst eintragen.`);
+    return null;
+  } finally {
+    ocr.stop(); // Worker beenden: kein erkannter Text bleibt im Hintergrund
+  }
+}
+
+/** Seiten mit markierbaren Fundstellen (für die Prüfliste). Liefert { node, mark(pageIndex, bbox) }. */
+export function markablePages(doc) {
+  const figures = doc.pages.map((p, i) => {
+    const marker = el('div', { class: 'ocr-mark', hidden: true });
+    const fig = el('figure', { class: 'doc-figure ocr-figure' }, pageImg(p, `Seite ${i + 1} von ${doc.pages.length}`), marker);
+    return { fig, marker, page: p };
+  });
+  const node = el('div', { class: 'doc-pages ocr-pages' }, figures.map(f => f.fig));
+  const mark = (pageIndex, bbox) => {
+    figures.forEach(f => { f.marker.hidden = true; });
+    const f = figures[pageIndex];
+    if (!f || !bbox) return;
+    const pct = (v, total) => `${Math.max(0, Math.min(100, (v / total) * 100))}%`;
+    Object.assign(f.marker.style, {
+      left: pct(bbox.x0 - 6, f.page.w), top: pct(bbox.y0 - 6, f.page.h),
+      width: pct(bbox.x1 - bbox.x0 + 12, f.page.w), height: pct(bbox.y1 - bbox.y0 + 12, f.page.h),
+    });
+    f.marker.hidden = false;
+    f.fig.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+  };
+  return { node, mark };
+}
+
 // ---------- Ansehen, bearbeiten, löschen ----------
 
 function fact(label, value) {
@@ -281,7 +351,7 @@ function fact(label, value) {
 }
 
 /** actions: zusätzliche Schaltflächen des aufrufenden Bereichs (z. B. „Laborwert eintragen“). */
-export function openDocument(id, { actions = [] } = {}) {
+export function openDocument(id, { actions = [], onValue = null } = {}) {
   const ctx = st.ctx;
   const doc = ctx.records.find(r => r.id === id && r.module === 'document');
   if (!doc) return;
@@ -298,7 +368,12 @@ export function openDocument(id, { actions = [] } = {}) {
         fact('Notiz', doc.note)),
       labs.length ? el('section', {},
         el('h3', {}, icon('heart-pulse'), 'Daraus eingetragene Werte'),
-        el('ul', { class: 'plain-list' }, labs.map(l => el('li', { text: `${l.parameter}: ${num.format(l.value)}${l.unit ? ` ${l.unit}` : ''}` })))) : null,
+        el('ul', { class: 'plain-list' }, labs.map(l => {
+          const label = `${l.parameter}: ${l.valueText && /[<>]/.test(l.valueText) ? l.valueText : num.format(l.value)}${l.unit ? ` ${l.unit}` : ''}`;
+          return el('li', {}, onValue
+            ? el('button', { type: 'button', class: 'link doc-value', 'aria-label': `${label} bearbeiten`, onclick: () => onValue(l) }, icon('pencil'), label)
+            : label);
+        }))) : null,
       el('p', { class: 'muted small', text: 'Seite antippen, um sie zu vergrößern.' }),
       el('div', { class: 'doc-pages' }, doc.pages.map((p, i) => el('figure', { class: 'doc-figure' },
         pageImg(p, `Seite ${i + 1} von ${doc.pages.length}`),
@@ -374,4 +449,6 @@ export function onLock() {
   st.urls.clear();
   st.onSaved = null;
   st.busy = false;
+  st.ocrCancelled = true;
+  ocr.stop();
 }

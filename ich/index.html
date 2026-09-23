@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' https://*.supabase.co; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' https://*.supabase.co https://www.googleapis.com https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="theme-color" content="#f7f8fa">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -47,6 +47,7 @@
     <symbol id="i-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><path d="M12 16v-4" /><path d="M12 8h.01" /></symbol>
     <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 21-4.34-4.34" /><circle cx="11" cy="11" r="8" /></symbol>
     <symbol id="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4" /> <path d="M12 2v2" /> <path d="M12 20v2" /> <path d="m4.93 4.93 1.41 1.41" /> <path d="m17.66 17.66 1.41 1.41" /> <path d="M2 12h2" /> <path d="M20 12h2" /> <path d="m6.34 17.66-1.41 1.41" /> <path d="m19.07 4.93-1.41 1.41" /></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" /></symbol>
     <symbol id="i-ellipsis" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1" /> <circle cx="19" cy="12" r="1" /> <circle cx="5" cy="12" r="1" /></symbol>
     <symbol id="i-camera" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13.997 4a2 2 0 0 1 1.76 1.05l.486.9A2 2 0 0 0 18.003 7H20a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h1.997a2 2 0 0 0 1.759-1.048l.489-.904A2 2 0 0 1 10.004 4z" /> <circle cx="12" cy="13" r="3" /></symbol>
     <symbol id="i-scan-text" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2" /> <path d="M17 3h2a2 2 0 0 1 2 2v2" /> <path d="M21 17v2a2 2 0 0 1-2 2h-2" /> <path d="M7 21H5a2 2 0 0 1-2-2v-2" /> <path d="M7 8h8" /> <path d="M7 12h10" /> <path d="M7 16h6" /></symbol>
@@ -111,6 +112,7 @@
     <header class="topbar">
       <h1 id="main-title">Tagebuch</h1>
       <div class="actions">
+        <button id="btn-theme" class="icon-btn" type="button" aria-label="Dunkel einschalten"><svg class="icon" aria-hidden="true"><use href="#i-moon"/></svg></button>
         <button id="btn-lock" class="icon-btn" aria-label="Sperren"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg></button>
       </div>
     </header>
@@ -128,7 +130,7 @@
           <button type="button" id="btn-more" class="icon-btn" aria-label="Mehr Angaben (Titel, Tags, Datum)"><svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg></button>
           <button type="submit" class="primary">Speichern</button>
         </div>
-        <p class="muted small rec-hint">Sprachnotizen bis 5 Minuten. Sie werden verschlüsselt gespeichert und nicht transkribiert.</p>
+        <p class="muted small rec-hint">Sprachnotizen bis 5 Minuten. Sie werden verschlüsselt gespeichert. Auf Wunsch wandelt die App sie auf diesem Gerät in Text um.</p>
         <div id="rec-review" class="rec-review" hidden></div>
       </form>
 
@@ -180,6 +182,14 @@
           <option value="dark">immer dunkel</option>
         </select>
       </label>
+    </div>
+
+    <div class="settings-group" id="settings-impulses">
+      <h2>Tagebuch-Impulse</h2>
+      <p class="muted small">Beides ist freiwillig und standardmäßig aus. Die Texte liegen in der App; deine Einträge werden dafür nicht ausgewertet.</p>
+      <label class="switch-row"><input type="checkbox" id="pref-impulses"><span><strong>Ermutigende Impulse</strong><span class="muted small">Jeden Tag ein neuer kurzer Gedanke auf „Heute“.</span></span></label>
+      <label class="switch-row"><input type="checkbox" id="pref-reflection"><span><strong>Reflexionshilfe</strong><span class="muted small">Nach einem Tagebucheintrag eine Frage zum Weiterdenken, jederzeit überspringbar.</span></span></label>
+      <p class="muted small" id="crisis-hint">Wenn es dir über längere Zeit nicht gut geht: Die TelefonSeelsorge ist Tag und Nacht kostenfrei erreichbar unter 0800 111 0 111, 0800 111 0 222 oder 116 123.</p>
     </div>
 
     <div class="settings-group">

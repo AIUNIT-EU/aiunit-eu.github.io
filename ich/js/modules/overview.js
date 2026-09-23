@@ -1,7 +1,9 @@
 // Übersicht: das Wichtigste aus allen Bereichen auf einen Blick, klar nach Bereichen getrennt.
 
 import { formatDE } from '../lib/dates.js';
+import { impulseFor } from '../lib/impulses.js';
 import { el, icon, euro } from '../ui/dom.js';
+import { todayHint } from './extras.js';
 import { dueContracts, monthlyTotal, editContract, openDetail } from './contracts.js';
 import { activeMedications, latestLabs, valueText, FLAG_TEXT, setSection, editLab, scheduleText } from './health.js';
 
@@ -20,6 +22,24 @@ function areaCard({ area, iconName, title, action, children }) {
 }
 
 const moreBtn = (label, onclick) => el('button', { class: 'link more', onclick }, label, icon('chevron-right'));
+
+/**
+ * Ermutigender Impuls des Tages (nur wenn eingeschaltet, R05). Nutzt keine Einträge.
+ * Erscheint auf „Heute“ und im Tagebuch (Anweisung Tom); prefix hält die IDs je Ansicht eindeutig.
+ */
+export function impulseCard(ctx, rerender, prefix = '') {
+  const p = ctx.prefs();
+  const today = ctx.today();
+  if (!p.impulses || p.impulseHidden === today) return null;
+  const offset = p.impulseOffset?.date === today ? p.impulseOffset.n : 0;
+  return el('aside', { class: 'impulse', id: `${prefix}impulse-card`, 'aria-label': 'Impuls des Tages' },
+    icon('sparkles'),
+    el('div', { class: 'impulse-body' },
+      el('p', { class: 'impulse-text', text: impulseFor(today, offset) }),
+      el('div', { class: 'impulse-actions' },
+        el('button', { class: 'link', id: `${prefix}btn-impulse-next`, onclick: () => { ctx.setPref('impulseOffset', { date: today, n: offset + 1 }); rerender(); } }, 'Anderer Impuls'),
+        el('button', { class: 'link', id: `${prefix}btn-impulse-hide`, onclick: () => { ctx.setPref('impulseHidden', today); rerender(); } }, 'Für heute ausblenden'))));
+}
 
 export function render(root, ctx) {
   const today = ctx.today();
@@ -103,14 +123,17 @@ export function render(root, ctx) {
         ? ` · ${age}${backup.verified ? ', geprüft' : ', ungeprüft'}${backup.due ? ' · jetzt sichern' : ''}`
         : ' · jetzt erstellen' })));
 
-  root.replaceChildren(
+  root.replaceChildren(...[ // leere Karten (null) auslassen, replaceChildren würde sonst „null“ anzeigen
     el('div', { class: 'hello' },
       el('p', { class: 'muted', text: now.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' }) }),
       el('h2', { class: 'hello-title', text: greeting(now) })),
     el('div', { class: 'quick-actions' },
       el('button', { class: 'primary', id: 'qa-note', onclick: () => ctx.newDiaryEntry() }, icon('notebook-pen'), 'Neue Notiz'),
       el('button', { class: 'secondary', id: 'qa-record', onclick: () => ctx.startRecording() }, icon('mic'), 'Aufnahme starten')),
+    todayHint(ctx),
+    impulseCard(ctx, () => render(root, ctx)),
     backupLine,
     diaryCard, contractsCard, healthCard,
-    el('p', { class: 'privacy-note' }, icon('shield-check'), 'Alle Daten liegen verschlüsselt nur auf diesem Gerät.'));
+    el('p', { class: 'privacy-note' }, icon('shield-check'), 'Alle Daten liegen verschlüsselt nur auf diesem Gerät.'),
+  ].filter(Boolean));
 }
