@@ -36,7 +36,10 @@ function boxNodes(ctx) {
     ];
   }
   const live = google.hasToken();
+  const none = c.lastResult && c.lastResult.total === 0;
   return [
+    el('p', { class: 'muted small', id: 'google-direction', text: 'Die App trägt die Kündigungsfristen deiner Verträge in den Kalender „ICH“ ein. Termine, die du selbst in Google Kalender anlegst, liest sie nicht.' }),
+    none ? el('p', { class: 'warn-text small', id: 'google-nothing', text: 'Zurzeit gibt es keine Fristen zu übertragen. Lege unter „Verträge“ einen Vertrag mit Laufzeitende (oder Beginn und Mindestlaufzeit) an, dann erscheint die Frist im Kalender „ICH“.' }) : null,
     el('ul', { class: 'plain-list connections-list' },
       el('li', {}, el('strong', { text: 'Google Kalender: ' }), `zuletzt abgeglichen ${stamp(c.lastSync)}`,
         c.lastResult ? ` (${c.lastResult.created} neu, ${c.lastResult.updated} geändert, ${c.lastResult.deleted} entfernt)` : '',
@@ -118,10 +121,11 @@ export async function syncNow(ctx, { interactive = false } = {}) {
     st.busy = true;
     refresh(ctx);
     const calendarId = await google.ensureCalendar(cfg(ctx).calendarId);
-    const result = await google.syncEvents(calendarId, allCalendarEvents(ctx.records, ctx.today()));
+    const desired = allCalendarEvents(ctx.records, ctx.today());
+    const result = { ...(await google.syncEvents(calendarId, desired)), total: desired.length };
     if (ctx.isLocked()) return;
     await saveCfg(ctx, { calendarId, lastSync: new Date().toISOString(), lastResult: result, dirty: false });
-    if (interactive) ctx.toast('Google Kalender ist aktuell.');
+    if (interactive) ctx.toast(desired.length ? 'Google Kalender ist aktuell.' : 'Keine Fristen zum Übertragen. Termine aus Google Kalender liest die App nicht.');
   } catch (err) {
     if (err.name === 'AbortError') return;
     st.error = err.name === 'NeedsAuth' ? 'Die Verbindung muss kurz bestätigt werden: bitte „Jetzt abgleichen“ tippen.' : err.message;
